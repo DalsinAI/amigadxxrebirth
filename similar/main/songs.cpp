@@ -674,7 +674,7 @@ int songs_play_file(char *filename, int repeat, void (*hook_finished_track)())
 
 namespace dsx {
 
-void songs_play_song(const song_number songnum, const int repeat)
+void songs_play_song(const song_number songnum, [[maybe_unused]] const int repeat)
 {
 	songs_init();
 

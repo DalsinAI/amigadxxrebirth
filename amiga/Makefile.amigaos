@@ -1,0 +1,234 @@
+# D1X-Rebirth (DXX-Rebirth's Descent 1 engine) for AmigaOS 3.x / AmiCradle,
+# 68040 + FPU, software renderer, on acsdl12.
+#
+#   make -f amiga/Makefile.amigaos [STOVE=...] [NDK=...] [ACSDL=...]
+#
+# STOVE is GFOpenAmigaGCC 16.2.0-open4 or later (C++23); ACSDL is acsdl12,
+# built with its own Makefile.amigaos. Upstream builds with SCons; this
+# Makefile builds the same d1x sources that
+#
+#   scons d1x=1 d2x=0 opengl=0 sdl2=0 sdlmixer=0 sdlimage=0 use_udp=0 \
+#         use_tracker=0 ipv6=0 editor=0 host_endian=big screenshot=legacy
+#
+# compiles, with the same flags, and amiga/dxxsconf.h in place of the
+# header SCons's tests write. PhysicsFS 3.2.0 (amiga/physfs, with a
+# dos.library platform layer) is built here as a static library.
+# Output: build/amigaos/Descent/ with the program, the ReadMe, the licences,
+# an empty Data drawer for the game data, and the icons.
+
+STOVE   ?= $(HOME)/CradleLab/toolchain/openamigagcc-16.2.0-open4-x86_64-linux
+NDK     ?= $(HOME)/CradleLab/gfopensdk/OpenNDK/Include_H
+ACSDL   ?= $(HOME)/CradleLab/guest-sdl/gameports/acsdl12
+ACGAME  ?= $(ACSDL)/../acgame
+# PhysicsFS needs no zlib (its zip reader has its own inflate); ZLIB is
+# here for acsdl12's build and is not used by this one.
+ZLIB    ?= $(HOME)/CradleLab/zlib-1.3.1
+CXX     = $(STOVE)/bin/m68k-amigaos-g++
+CC      = $(STOVE)/bin/m68k-amigaos-gcc
+AR      = $(STOVE)/bin/m68k-amigaos-ar
+PYTHON  ?= python3
+CPU     ?= -m68040 -m68881
+OPT     ?= -O2 -fomit-frame-pointer
+
+.DEFAULT_GOAL := all
+
+BUILD   = build/amigaos
+OBJDIR  = $(BUILD)/obj
+OUT     = $(BUILD)/Descent
+
+# The warnings SConstruct turns on for g++, as it does on every platform.
+DXX_WARN = -Wall -Wformat=2 -Wextra -Wmissing-braces -Wmissing-include-dirs \
+	-Wuninitialized -Wundef -Wpointer-arith -Wcast-qual -Wmissing-declarations \
+	-Wvla -Werror=unused -Werror=useless-cast -Wimplicit-fallthrough=5 \
+	-Wduplicated-branches -Wduplicated-cond -Wstrict-flex-arrays \
+	-Wsuggest-attribute=noreturn -Wsuggest-final-types -Wsuggest-override \
+	-Wlogical-op -Wold-style-cast -Wredundant-decls -Wno-sign-compare
+
+INCS    = -Iamiga -Icommon/include -Icommon/main -I. -Iamiga/physfs \
+	-I$(ACSDL)/include/SDL -I$(ACSDL)/include -I$(ACGAME)/include -I$(NDK)
+# DXX_USE_SHAREPATH=0: no system-wide data directory; the game finds its
+# data in PROGDIR:Data/ (and PROGDIR:), and writes there too.
+DEFS    = -DPHYSFS_DEPRECATED= -DDXX_USE_SHAREPATH=0 -DNDEBUG -DRELEASE
+CXXBASE = -noixemul $(OPT) $(CPU) -std=gnu++23 -ftabstop=4 -funsigned-char \
+	-fstrict-flex-arrays $(DXX_WARN) $(DEFS) $(INCS)
+CXXFLAGS = $(CXXBASE) -include amiga/amiga_prefix.h -MMD -MP
+D1XBASE  = -DDXX_BUILD_DESCENT=1 -D__STDC_FORMAT_MACROS -Id1x-rebirth/main
+D1XFLAGS = $(D1XBASE)
+LDFLAGS = -noixemul $(CPU)
+
+# PhysicsFS: the directory, HOG and ZIP archivers are all Descent uses.
+PHYSFS_SRC = $(wildcard amiga/physfs/*.c)
+PHYSFS_OBJ = $(PHYSFS_SRC:amiga/physfs/%.c=$(OBJDIR)/physfs/%.o)
+PHYSFS_LIB = $(BUILD)/libphysfs.a
+PHYSFS_CFLAGS = -noixemul -O2 $(CPU) -std=gnu99 -Wall -DNDEBUG \
+	-DPHYSFS_SUPPORTS_DEFAULT=0 -DPHYSFS_SUPPORTS_HOG=1 -DPHYSFS_SUPPORTS_ZIP=1 \
+	-I$(NDK)
+
+# The sources SConstruct builds for this profile (common/ once for both
+# games, the rest with DXX_BUILD_DESCENT=1).
+COMMON_SRC = \
+	common/2d/2dsline.cpp common/2d/bitblt.cpp common/2d/bitmap.cpp \
+	common/2d/box.cpp common/2d/canvas.cpp common/2d/circle.cpp \
+	common/2d/disc.cpp common/2d/font.cpp common/2d/gpixel.cpp \
+	common/2d/line.cpp common/2d/palette.cpp common/2d/pixel.cpp \
+	common/2d/rect.cpp common/2d/rle.cpp common/2d/scalec.cpp \
+	common/3d/clipper.cpp common/3d/draw.cpp common/3d/globvars.cpp \
+	common/3d/instance.cpp common/3d/matrix.cpp common/3d/points.cpp \
+	common/3d/rod.cpp common/3d/setup.cpp common/arch/sdl/event.cpp \
+	common/arch/sdl/joy.cpp common/arch/sdl/key.cpp \
+	common/arch/sdl/mouse.cpp \
+	common/arch/sdl/timer.cpp common/arch/sdl/window.cpp \
+	common/main/cglobal.cpp common/main/cli.cpp common/main/cmd.cpp \
+	common/main/cvar.cpp common/main/piggy.cpp common/maths/fixc.cpp \
+	common/maths/homing.cpp common/maths/rand.cpp common/maths/tables.cpp \
+	common/maths/vecmat.cpp common/mem/mem.cpp common/misc/error.cpp \
+	common/misc/hash.cpp common/misc/hmp.cpp common/misc/ignorecase.cpp \
+	common/misc/physfsrwops.cpp common/misc/physfsx.cpp \
+	common/misc/strutil.cpp common/misc/vgrphys.cpp \
+	common/misc/vgwphys.cpp common/texmap/ntmap.cpp \
+	common/texmap/scanline.cpp common/texmap/tmapflat.cpp
+
+D1X_SRC = \
+	d1x-rebirth/main/custom.cpp d1x-rebirth/main/movie.cpp \
+	d1x-rebirth/main/snddecom.cpp d2x-rebirth/libmve/decoder16.cpp \
+	d2x-rebirth/libmve/decoder8.cpp d2x-rebirth/libmve/mve_audio.cpp \
+	d2x-rebirth/libmve/mvelib.cpp d2x-rebirth/libmve/mveplay.cpp \
+	similar/2d/palette.cpp similar/2d/pcx.cpp similar/3d/interp.cpp \
+	similar/arch/sdl/digi_audio.cpp similar/arch/sdl/digi.cpp \
+	similar/arch/sdl/gr.cpp similar/arch/sdl/init.cpp similar/main/ai.cpp \
+	similar/main/aipath.cpp similar/main/automap.cpp similar/main/bm.cpp \
+	similar/main/bmread.cpp similar/main/cntrlcen.cpp \
+	similar/main/collide.cpp similar/main/config.cpp \
+	similar/main/console.cpp similar/main/controls.cpp \
+	similar/main/credits.cpp similar/main/digiobj.cpp \
+	similar/main/effects.cpp similar/main/endlevel.cpp \
+	similar/main/fireball.cpp similar/main/fuelcen.cpp \
+	similar/main/fvi.cpp similar/main/gamecntl.cpp similar/main/game.cpp \
+	similar/main/gamefont.cpp similar/main/gamemine.cpp \
+	similar/main/gamerend.cpp similar/main/gamesave.cpp \
+	similar/main/gameseg.cpp similar/main/gameseq.cpp \
+	similar/main/gauges.cpp similar/main/hostage.cpp similar/main/hud.cpp \
+	similar/main/iff.cpp similar/main/inferno.cpp \
+	similar/main/kconfig.cpp similar/main/kmatrix.cpp \
+	similar/main/laser.cpp similar/main/lighting.cpp \
+	similar/main/menu.cpp similar/main/mglobal.cpp \
+	similar/main/mission.cpp similar/main/morph.cpp \
+	similar/main/multi.cpp similar/main/multibot.cpp \
+	similar/main/newdemo.cpp similar/main/newmenu.cpp \
+	similar/main/object.cpp similar/main/paging.cpp \
+	similar/main/physics.cpp similar/main/piggy.cpp \
+	similar/main/player.cpp similar/main/playsave.cpp \
+	similar/main/polyobj.cpp similar/main/powerup.cpp \
+	similar/main/render.cpp similar/main/robot.cpp \
+	similar/main/scores.cpp similar/main/segment.cpp \
+	similar/main/slew.cpp similar/main/songs.cpp similar/main/state.cpp \
+	similar/main/switch.cpp similar/main/terrain.cpp \
+	similar/main/texmerge.cpp similar/main/text.cpp \
+	similar/main/titles.cpp similar/main/vclip.cpp \
+	similar/main/vers_id.cpp similar/main/wall.cpp \
+	similar/main/weapon.cpp similar/misc/args.cpp \
+	similar/misc/physfsx.cpp amiga/multi_none.cpp
+
+COMMON_OBJ = $(COMMON_SRC:%.cpp=$(OBJDIR)/%.o)
+D1X_OBJ    = $(D1X_SRC:%.cpp=$(OBJDIR)/d1x/%.o)
+AMIGA_OBJ  = $(OBJDIR)/amiga/stack.o $(OBJDIR)/amiga/pthread_stubs.o
+OBJS       = $(COMMON_OBJ) $(D1X_OBJ) $(AMIGA_OBJ)
+
+# What SConstruct passes to the few files that report the version.
+GIT_COMMIT  := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+VERSION_EXTRA ?= Amiga
+# A string as the comma-separated character codes vers_id.cpp wants.
+chars = $(shell printf '%s' '$(1)' | od -An -tu1 | tr -s ' \n' ',,' | sed 's/^,//;s/,$$//')
+CXX_VERSION := $(shell $(CXX) --version 2>/dev/null | head -n 1)
+# vers_id.cpp records how the program was built; demos carry it (newdemo.cpp).
+$(OBJDIR)/d1x/similar/main/vers_id.o: D1XFLAGS += \
+	-DDESCENT_VERSION_EXTRA=$(call chars,$(VERSION_EXTRA)) \
+	-DDESCENT_CXX=$(call chars,CXX=m68k-amigaos-g++) \
+	-DDESCENT_CXX_version=$(call chars,CXX_version=$(CXX_VERSION)) \
+	-DDESCENT_CPPFLAGS=$(call chars,CPPFLAGS=$(DEFS)) \
+	-DDESCENT_CXXFLAGS=$(call chars,CXXFLAGS=$(OPT) $(CPU) -std=gnu++23) \
+	-DDESCENT_LINKFLAGS=$(call chars,LINKFLAGS=$(LDFLAGS)) \
+	-DDESCENT_git_status=$(call chars,git_status=$(GIT_COMMIT)) \
+	-DDESCENT_git_diffstat=$(call chars,git_diffstat=) \
+	'-DDXX_RBE(A)=A(CXX)A(CPPFLAGS)A(CXXFLAGS)A(LINKFLAGS)A(CXX_version)A(git_status)A(git_diffstat)'
+$(OBJDIR)/d1x/similar/main/inferno.o: D1XFLAGS += -DDXX_git_commit=$(GIT_COMMIT) -DDXX_git_describe=amiga
+$(OBJDIR)/d1x/similar/main/playsave.o: D1XFLAGS += -DDXX_VERSION_SEQ=0,61,0
+
+# kconfig.cpp includes a table of which control is up, down, left and
+# right of which, made by a script from the preprocessed ui-table
+# (with CXXBASE and D1XBASE: the script reads only that file's own
+# declarations, and kconfig.o's -include would reach its prerequisites).
+KCONFIG_I    = $(OBJDIR)/d1x/kconfig.ui-table.i
+KCONFIG_UDLR = $(OBJDIR)/d1x/kconfig.udlr.h
+$(KCONFIG_I): similar/main/kconfig.ui-table.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) -E $(CXXBASE) $(D1XBASE) -DDXX_KCONFIG_UI_ENUM=DXX_KCONFIG_UI_ENUM \
+		-DDXX_KCONFIG_UI_LABEL=DXX_KCONFIG_UI_LABEL -Dkc_item=kc_item -o $@ $<
+$(KCONFIG_UDLR): $(KCONFIG_I) similar/main/generate-kconfig-udlr.py
+	$(PYTHON) similar/main/generate-kconfig-udlr.py $< $@
+$(OBJDIR)/d1x/similar/main/kconfig.o: $(KCONFIG_UDLR)
+$(OBJDIR)/d1x/similar/main/kconfig.o: D1XFLAGS += -include $(KCONFIG_UDLR)
+
+ICONS   = amiga/icons/Descent-drawer.info amiga/icons/Descent.info \
+	amiga/icons/ReadMe.info amiga/icons/COPYING.info amiga/icons/Data.info
+DRAWER_ICON = amiga/icons/Descent-drawer.info
+
+all: $(OUT)/Descent $(OUT)/ReadMe
+
+$(OUT)/Descent: $(OBJS) $(PHYSFS_LIB) | $(OUT)
+	$(CXX) $(LDFLAGS) -o $@ $(OBJS) $(PHYSFS_LIB) $(ACSDL)/build/amigaos/libacsdl12.a -lm
+
+# The ReadMe, the licences in one COPYING, an empty Data drawer with its
+# own ReadMe, and the icons; Descent.info goes beside the drawer.
+$(OUT)/ReadMe: AMIGA_PORT.md amiga/Data-ReadMe COPYING.txt GPL-3.txt amiga/physfs/LICENSE.txt $(ICONS) | $(OUT)
+	cp AMIGA_PORT.md $(OUT)/ReadMe
+	( cat COPYING.txt; echo; echo; cat GPL-3.txt; echo; echo; \
+	  echo "PhysicsFS (amiga/physfs), linked into the program:"; echo; \
+	  cat amiga/physfs/LICENSE.txt ) > $(OUT)/COPYING
+	mkdir -p $(OUT)/Data
+	cp amiga/Data-ReadMe $(OUT)/Data/ReadMe
+	cp amiga/icons/Descent.info amiga/icons/ReadMe.info amiga/icons/COPYING.info \
+	   amiga/icons/Data.info $(OUT)/
+	cp amiga/icons/ReadMe.info $(OUT)/Data/ReadMe.info
+	cp $(DRAWER_ICON) $(BUILD)/Descent.info
+
+$(PHYSFS_LIB): $(PHYSFS_OBJ)
+	rm -f $@
+	$(AR) rcs $@ $^
+
+$(OBJDIR)/physfs/%.o: amiga/physfs/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(PHYSFS_CFLAGS) -c -o $@ $<
+
+$(OBJDIR)/common/%.o: common/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+$(OBJDIR)/d1x/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(D1XFLAGS) -c -o $@ $<
+
+# pthread_stubs.c: libstdc++ and libgcc's unwinder ask for POSIX threads;
+# the game has one. Its loose signatures are not checked against a header.
+$(OBJDIR)/amiga/pthread_stubs.o: amiga/pthread_stubs.c
+	@mkdir -p $(dir $@)
+	$(CC) -noixemul -O2 $(CPU) -c -o $@ $<
+
+$(OBJDIR)/amiga/%.o: amiga/%.c
+	@mkdir -p $(dir $@)
+	$(CC) -noixemul -O2 $(CPU) -std=gnu99 -Wall -Wextra -c -o $@ $<
+
+$(OUT):
+	mkdir -p $@
+
+-include $(COMMON_OBJ:.o=.d) $(D1X_OBJ:.o=.d)
+
+
+clean:
+	rm -rf $(OBJDIR) $(PHYSFS_LIB) $(OUT) $(BUILD)/Descent.info
+
+.PHONY: all clean
+
+# Every object, without linking.
+objs: $(OBJS) $(PHYSFS_LIB)
+.PHONY: objs

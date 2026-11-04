@@ -239,9 +239,14 @@ void gr_palette_step_up( int r, int g, int b )
 		colors[i].b = std::clamp(ib, 0, 63) * 4;
 	}
 	SDL_SetColors(canvas, colors.data(), 0, colors.size());
+#ifdef __amigaos__
+	/* acsdl12 opens an 8-bit screen: give it the canvas's colours, so
+	 * gr_flip()'s blit is a straight copy, not a remap. */
+	SDL_SetColors(screen, colors.data(), 0, colors.size());
+#endif
 }
 
-void gr_palette_load( palette_array_t &pal )
+void gr_palette_load(const palette_array_t &pal)
 {
 	SDL_Palette *palette;
 	std::array<uint8_t, 64> gamma;
@@ -274,6 +279,11 @@ void gr_palette_load( palette_array_t &pal )
 	}
 
 	SDL_SetColors(canvas, colors.data(), 0, colors.size());
+#ifdef __amigaos__
+	/* acsdl12 opens an 8-bit screen: give it the canvas's colours, so
+	 * gr_flip()'s blit is a straight copy, not a remap. */
+	SDL_SetColors(screen, colors.data(), 0, colors.size());
+#endif
 	reset_computed_colors();
 	gr_remap_color_fonts();
 }

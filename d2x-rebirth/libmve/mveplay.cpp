@@ -84,7 +84,7 @@ MVESTREAM::handle_result MVESTREAM::handle_mve_segment_endofstream()
  */
 static int micro_frame_delay=0;
 static int timer_started=0;
-static struct timeval timer_expire = {0, 0};
+static struct timeval timer_expire{};
 
 }
 

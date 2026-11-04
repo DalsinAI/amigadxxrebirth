@@ -1,0 +1,28 @@
+Descent's game data goes in this drawer
+=======================================
+
+D1X-Rebirth is the engine only. It needs the data files of Descent 1,
+which are not included:
+
+  descent.hog
+  descent.pig
+
+Copy them into this drawer (Data, beside the Descent program). Names may
+be in any case. The game also finds them in the Descent drawer itself.
+
+Either data set works:
+
+- The shareware release of Descent 1 (version 1.4), which Parallax and
+  Interplay let anyone copy unchanged: the first 7 levels. Its archive
+  (for example d1shar14.zip, or descent1.4 shareware for DOS) holds
+  descent.hog and descent.pig.
+- The full game (registered 1.4 or 1.5, from your own CD or a store
+  copy): all 27 levels and the secret ones. Copy descent.hog and
+  descent.pig from its directory, after patching to 1.4 or 1.5.
+
+Optional extras go here too: custom missions in a "missions" drawer you
+make here, and demos in "demos".
+
+The game writes its settings (descent.cfg), pilots (*.plr), saved games
+and screenshots in the Descent drawer, so that drawer must not be
+write-protected.

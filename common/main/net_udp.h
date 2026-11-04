@@ -20,6 +20,7 @@
 #include "d_bitset.h"
 #include <array>
 
+#if DXX_USE_UDP
 // Exported functions
 #ifdef DXX_BUILD_DESCENT
 namespace dsx {
@@ -157,3 +158,37 @@ struct UDP_mdata_check : public prohibit_void_ptr<>
 	uint32_t			pkt_num_torecv; 			// the next pkt_num we await for this player
 	uint32_t			pkt_num_tosend; 			// the next pkt_num we want to send to another player
 };
+#else
+/* Multiplayer without UDP (DXX_USE_MULTIPLAYER and !DXX_USE_UDP, as on
+ * AmigaOS): the multiplayer code is built, but there is no protocol to
+ * start or join a game with, so the dispatch table does nothing. Its
+ * definition is in the port (amiga/multi_none.cpp). */
+#ifdef DXX_BUILD_DESCENT
+namespace dsx {
+namespace multi {
+namespace none {
+struct dispatch_table final : multi::dispatch_table
+{
+	virtual void send_data(std::span<const uint8_t> data, multiplayer_data_priority priority) const override;
+	virtual void send_data_direct(std::span<const uint8_t> data, playernum_t pnum, int needack) const override;
+	virtual int objnum_is_past(objnum_t objnum) const override;
+	virtual void do_protocol_frame(int force, int listen) const override;
+	virtual window_event_result level_sync() const override;
+	virtual void send_endlevel_packet() const override;
+	virtual void kick_player(const _sockaddr &dump_addr, kick_player_reason why) const override;
+	virtual void disconnect_player(int playernum) const override;
+	virtual int end_current_level(
+#if DXX_BUILD_DESCENT == 1
+		next_level_request_secret_flag *secret
+#endif
+		) const override;
+	virtual void leave_game() const override;
+};
+
+extern const dispatch_table dispatch;
+}
+using none::dispatch;
+}
+}
+#endif
+#endif
