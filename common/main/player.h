@@ -1,0 +1,231 @@
+/*
+ * Portions of this file are copyright Rebirth contributors and licensed as
+ * described in COPYING.txt.
+ * Portions of this file are copyright Parallax Software and licensed
+ * according to the Parallax license below.
+ * See COPYING.txt for license details.
+
+THE COMPUTER CODE CONTAINED HEREIN IS THE SOLE PROPERTY OF PARALLAX
+SOFTWARE CORPORATION ("PARALLAX").  PARALLAX, IN DISTRIBUTING THE CODE TO
+END-USERS, AND SUBJECT TO ALL OF THE TERMS AND CONDITIONS HEREIN, GRANTS A
+ROYALTY-FREE, PERPETUAL LICENSE TO SUCH END-USERS FOR USE BY SUCH END-USERS
+IN USING, DISPLAYING,  AND CREATING DERIVATIVE WORKS THEREOF, SO LONG AS
+SUCH USE, DISPLAY OR CREATION IS FOR NON-COMMERCIAL, ROYALTY OR REVENUE
+FREE PURPOSES.  IN NO EVENT SHALL THE END-USER USE THE COMPUTER CODE
+CONTAINED HEREIN FOR REVENUE-BEARING PURPOSES.  THE END-USER UNDERSTANDS
+AND AGREES TO THE TERMS HEREIN AND ACCEPTS THE SAME BY USE OF THIS FILE.
+COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
+*/
+
+/*
+ *
+ * Structure information for the player
+ *
+ */
+
+#pragma once
+
+#include "fwd-player.h"
+
+#include <physfs.h>
+#include "vecmat.h"
+#include "fwd-weapon.h"
+
+#ifdef __cplusplus
+#include <algorithm>
+#include "pack.h"
+#include "dxxsconf.h"
+#include "objnum.h"
+#include "player-callsign.h"
+
+#ifdef DXX_BUILD_DESCENT
+#include "fwd-segment.h"
+#include "player-flags.h"
+#include "valptridx.h"
+#include <array>
+
+namespace dcx {
+
+enum class player_connection_status : uint8_t
+{
+	disconnected,
+	playing,
+	waiting,
+	died_in_mine,
+	found_secret,
+	escape_tunnel,
+	end_menu,
+};
+
+enum class team_number : uint8_t
+{
+	blue,
+	red,
+};
+
+enum class player_gun_number : uint8_t
+{
+	_0,
+	_1,
+	_2,
+	_3,
+	_4,
+	center = 6,
+	_7,
+};
+
+struct d_player_unique_endlevel_state
+{
+	segnum_t transition_segnum;
+	segnum_t exit_segnum;
+};
+
+extern d_player_unique_endlevel_state PlayerUniqueEndlevelState;
+
+// When this structure changes, increment the constant
+// SAVE_FILE_VERSION in playsave.c
+struct player : public prohibit_void_ptr<>
+{
+	// Who am I data
+	callsign_t callsign;   // The callsign of this player, for net purposes.
+	player_connection_status connected;              // Is the player connected or not?
+	objnum_t     objnum;                 // What object number this player is. (made an int by mk because it's very often referenced)
+
+	//  -- make sure you're 4 byte aligned now!
+
+	// Game data
+	uint16_t lives;                  // Lives remaining, 0 = game over.
+	sbyte   level;                  // Current level player is playing. (must be signed for secret levels)
+	sbyte   starting_level;         // What level the player started on.
+
+	// Statistics...
+	fix     time_level;             // Level time played
+	fix     time_total;             // Game time played (high word = seconds)
+
+
+	short   num_kills_level;        // Number of kills this level
+	short   num_kills_total;        // Number of kills total
+	uint8_t hours_level;            // Hours played (since time_total can only go up to 9 hours)
+	uint8_t hours_total;            // Hours played (since time_total can only go up to 9 hours)
+};
+
+DXX_VALPTRIDX_DEFINE_SUBTYPE_TYPEDEFS(player, player);
+DXX_VALPTRIDX_DEFINE_GLOBAL_FACTORIES(player, player, Players);
+}
+
+namespace dsx {
+
+// Same as above but structure how Savegames expect
+struct player_rw
+{
+	// Who am I data
+	callsign_t callsign;   // The callsign of this player, for net purposes.
+	ubyte   net_address[6];         // The network address of the player.
+	uint8_t connected;              // Is the player connected or not?
+	int     objnum;                 // What object number this player is. (made an int by mk because it's very often referenced)
+	int     n_packets_got;          // How many packets we got from them
+	int     n_packets_sent;         // How many packets we sent to them
+
+	//  -- make sure you're 4 byte aligned now!
+
+	// Game data
+	uint    flags;                  // Powerup flags, see below...
+	fix     energy;                 // Amount of energy remaining.
+	fix     shields;                // shields remaining (protection)
+	ubyte   lives;                  // Lives remaining, 0 = game over.
+	sbyte   level;                  // Current level player is playing. (must be signed for secret levels)
+	ubyte   laser_level;            // Current level of the laser.
+	sbyte   starting_level;         // What level the player started on.
+	short   killer_objnum;          // Who killed me.... (-1 if no one)
+#if DXX_BUILD_DESCENT == 1
+	ubyte		primary_weapon_flags;					//	bit set indicates the player has this weapon.
+	ubyte		secondary_weapon_flags;					//	bit set indicates the player has this weapon.
+#elif DXX_BUILD_DESCENT == 2
+	ushort  primary_weapon_flags;   // bit set indicates the player has this weapon.
+	ushort  secondary_weapon_flags; // bit set indicates the player has this weapon.
+#endif
+	union {
+		std::array<uint16_t, MAX_PRIMARY_WEAPONS> obsolete_primary_ammo;
+		struct {
+			uint16_t laser_ammo;
+			uint16_t vulcan_ammo;
+		};
+	};
+	ushort  secondary_ammo[MAX_SECONDARY_WEAPONS]; // How much ammo of each type.
+
+#if DXX_BUILD_DESCENT == 2
+	ushort  pad; // Pad because increased weapon_flags from byte to short -YW 3/22/95
+#endif
+	//  -- make sure you're 4 byte aligned now
+
+	// Statistics...
+	int     last_score;             // Score at beginning of current level.
+	int     score;                  // Current score.
+	fix     time_level;             // Level time played
+	fix     time_total;             // Game time played (high word = seconds)
+
+	fix     cloak_time;             // Time cloaked
+	fix     invulnerable_time;      // Time invulnerable
+
+#if DXX_BUILD_DESCENT == 2
+	short   KillGoalCount;          // Num of players killed this level
+#endif
+	short   net_killed_total;       // Number of times killed total
+	short   net_kills_total;        // Number of net kills total
+	short   num_kills_level;        // Number of kills this level
+	short   num_kills_total;        // Number of kills total
+	short   num_robots_level;       // Number of initial robots this level
+	short   num_robots_total;       // Number of robots total
+	ushort  hostages_rescued_total; // Total number of hostages rescued.
+	ushort  hostages_total;         // Total number of hostages.
+	ubyte   hostages_on_board;      // Number of hostages on ship.
+	ubyte   hostages_level;         // Number of hostages on this level.
+	fix     homing_object_dist;     // Distance of nearest homing object.
+	sbyte   hours_level;            // Hours played (since time_total can only go up to 9 hours)
+	sbyte   hours_total;            // Hours played (since time_total can only go up to 9 hours)
+} __pack__;
+#if DXX_BUILD_DESCENT == 1
+static_assert(sizeof(player_rw) == 116, "wrong size player_rw");
+#elif DXX_BUILD_DESCENT == 2
+static_assert(sizeof(player_rw) == 142, "wrong size player_rw");
+#endif
+
+}
+
+#define get_local_player()	(*vmplayerptr(Player_num))
+#define get_local_plrobj()	(*vmobjptr(get_local_player().objnum))
+
+namespace dcx {
+
+struct player_ship
+{
+	union {
+		::d1x::polygon_model_index d1x;
+		::d2x::polygon_model_index d2x;
+	} model_num;
+	vclip_index expl_vclip_num;
+	fix     mass,drag;
+	fix     max_thrust;       //low_thrust
+	fix     wiggle;
+	fix     max_rotthrust;
+	enumerated_array<vms_vector, /* N_PLAYER_GUNS = */ 8, player_gun_number> gun_points;
+};
+
+}
+
+namespace dsx {
+
+namespace little_endian {
+
+/*
+ * reads a player_ship structure from a PHYSFS_File
+ */
+void player_ship_read(player_ship *ps, NamedPHYSFS_File fp);
+
+}
+
+}
+
+#endif
+
+#endif

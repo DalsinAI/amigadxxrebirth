@@ -1,0 +1,113 @@
+// Microsoft Visual C++ generated resource script.
+//
+#include "include/resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "afxres.h"
+#include "vers_id.h"
+#if DXX_BUILD_DESCENT == 1
+#define DXX_ICON_NUMBER	"1"
+#elif DXX_BUILD_DESCENT == 2
+#define DXX_ICON_NUMBER	"2"
+#endif
+1	RT_MANIFEST	"dxx-rebirth.manifest"
+IDI_DXX_ICON            ICON                    "d" DXX_ICON_NUMBER "x-rebirth.ico"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION DXX_VERSION_SEQ,0
+ PRODUCTVERSION DXX_VERSION_SEQ,0
+ FILEFLAGSMASK 0x3fL
+#ifndef NDEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "000004b0"
+        BEGIN
+            VALUE "FileDescription", "Descent " DXX_ICON_NUMBER " Rebirth"
+            VALUE "FileVersion", DXX_VERSION_STR ".0"
+            VALUE "InternalName", "d" DXX_ICON_NUMBER "-rebirth.exe"
+            VALUE "OriginalFilename", "d" DXX_ICON_NUMBER "-rebirth.exe"
+            VALUE "ProductName", "Descent " DXX_ICON_NUMBER " Rebirth"
+            VALUE "ProductVersion", DXX_VERSION_STR ".0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0, 1200
+    END
+END
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// English (United States) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE
+BEGIN
+    "include/resource.h\0"
+END
+
+2 TEXTINCLUDE
+BEGIN
+    "#include ""afxres.h""\r\n"
+    "#include ""vers_id.h""\r\n"
+	"#if DXX_BUILD_DESCENT == 1\r\n"
+	"#define DXX_ICON_NUMBER	""1""\r\n"
+	"#elif DXX_BUILD_DESCENT == 2\r\n"
+	"#define DXX_ICON_NUMBER	""2""\r\n"
+	"#endif\r\n"
+	"1	RT_MANIFEST	""dxx-rebirth.manifest""\r\n"
+	"IDI_DXX_ICON            ICON                    ""d"" DXX_ICON_NUMBER ""x-rebirth.ico""\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+#endif    // English (United States) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+

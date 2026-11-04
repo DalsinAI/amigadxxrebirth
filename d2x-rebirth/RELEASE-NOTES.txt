@@ -1,0 +1,95 @@
+RELEASE NOTES
+=============
+
+What's new in 0.61
+------------------
+* Added experimental support for generating extra start positions in cooperative games.  If the number of starts requested exceeds the number provided, the game will attempt to generate extra starts near the original ones.  Users are strongly cautioned to save before entering a new level, in case the start position synthesis causes problems.  Additionally, users are cautioned that the engine has never before permitted more than 4 players in cooperative games, so any cooperative-specific code paths may not handle large games correctly.  Reports, both of success and of failure, are welcome.
+  * Raised limit on cooperative players from 4 to 8.  The limit cannot be raised further without changes to the savegame format.
+  * When more than 4 players are permitted, the per-player marker limit is reduced to 2, regardless of whether more than 4 players are actually in the game.  Due to savegame limitations, at most 16 markers can be in use.  The 0.60.x limit of 4 per-player is retained when there are at most 4 players permitted in the game.
+* Partially fixed a bug relating to the orientation of spreadfire/helix cannons.  Weapon orientation was neither saved nor loaded, which caused illogical results when saving, firing, loading, and firing again.  The orientation cannot be saved without altering the savegame format, but it is now reset when appropriate.
+* Fixed original game bug that meant to reset camera flag, but did not.
+* Added experimental support for automatic game saves in single player and in cooperative multiplayer.  The interval between saves can be configured separately, through the Gameplay Options and Netgame->Advanced Options dialogs, respectively.  If the interval is set to 0, then no automatic save is made.  For multiplayer, only the host can save, so only the host's auto-save interval is relevant.  Automatic saves of single player and multiplayer are given distinct names.  Automatic saves are stored in the previously inaccessible 11th slot, so only one autosave of each type can exist per pilot.  Autosaves are loaded through the usual menu interface, and use the same file format as regular saves, so they can be renamed to a regular save if desired.  Autosaves are given a description that shows the time at which they were created.
+
+Breaking change:
+* A change to how objects are tracked causes savegames that are created in new builds, then loaded in a previous release, such as 0.58.1, to behave incorrectly (issue #449).  Saves created in an old release, and loaded in a new one, should work correctly.
+
+What's new in 0.60
+------------------
+* Merged code bases and massive code refactorization. [Massive thanks to kp]
+* Screenshots are now saved as PNG by default.  This reduces size, sometimes very substantially, and simplifies posting screenshots online.
+* Screenshot filenames are now date-stamped.
+* Homing projectiles now behave like in the original game running at 30 FPS! [Thanks to Drakona, Lothar, roncli, A Future Pilot, Ryusei117 and more]
+* Fixed FPS fluctuations with VSync. [Thanks to derhass]
+* Flashing effects properly scale to ingame brightness setting.
+* In addition to quicksave, there is now a quickload key!
+* Original base input sensitivity for all devices and mouse overrun option for mouse. [Thanks to the Retro team]
+* Improved collision detection, fixing player damage being way too low in some ocassions. [Thanks to Drakona]
+* Reworked OPTIONS menu.
+* New texture filtering options! [Thanks to beware]
+* Optional timers displaying countdowns for cloak and invulnerability.
+* New tracker for Multiplayer games.
+* Players can now drop the Quad Laser powerup and Laser powerups 2-4.  Players cannot drop Super Laser powerups at all.
+* Players can now choose whether respawning is triggered by any input or only by pressing a weapon firing input.  This allows players using push-to-talk to speak without respawning, and allows all players to iconify the game while dead.
+* When a player exhausts an available weapon, auto-select previously acted as if the player had pressed the key to cycle to the next weapon.  Now, it starts its search at the top of the auto-select preference list.  Given three available weapons, with priorities #1, #2, and #3, if the player exhausted #2, the old behaviour was to select #3.  Now, it selects #1. (Github issue #156).
+* Fixed bug which allowed boss robots to teleport to a disallowed segment.
+* Fixed bug which caused players to disagree about boss location after teleportation.
+* Fixed a startup crash when more than 8 joysticks are present.
+* Maximum number of joysticks is unchanged at 8, but is now settable via SConf parameter `max_joysticks`; previously, a source patch was required to change this limit.  See also new SConf parameters `max_axes_per_joystick` (128), `max_buttons_per_joystick` (128), and `max_hats_per_joystick` (4).
+* Generated boss robots were able to teleport into their starting segment, even if that segment was too small.  This is no longer allowed (unless there are no segments into which it can teleport).
+* Cloaked robots dropped from other robots will now cloak, rather than rendering with their placeholder texture.
+* Internal limits on the number of destructable lights ("delta lights"; 10000 -> 32000), robot materialization centers (20 -> 128), and fuel centers (D1:50, D2: 70 -> both: 128) have been raised.
+* Robot homing weapons now pick a target when first fired.  Previously, they always began by tracking player 0.
+* Using a fusion cannon against a boss which reflects energy weapons no longer produces a multiplier effect.  The boss will now reflect only the bolts sent in.  Previously, it reflected one bolt for every frame that the shot was in contact with the boss, producing dozens of reflected bolts.  Although visually interesting, this was not the original author's intent, and the implementation had several defects.  If there is community objection, this change might be reverted or made configurable (Github issue #265; #269).
+* Fixed a bug which allowed premature Omega cannon recharging after ~9.1 hours on the same level (Github issue #262).
+* Fixed a bug which prevented Omega cannon recharging after ~4459701 years on the same level (Github issue #262).
+* Fixed a bug which allowed markers to expire in multiplayer games if the automap was left open for ~5.1 hours.
+* Prevented undefined behaviour when a level trigger tries to open a wall where no wall exists.  This is also diagnosed to the console, so that the level author can fix the level (Github issue #236).
+* Prevented undefined behaviour when playing a demo of a level with some types of invalid reactor triggers.
+* Fixed a bug where exploding players were checked for the Flash Missile special.  Normally, this was silent and harmless, but it might have produced odd results in mods which apply the Flash Missile special to low-numbered weapons.
+* Fixed a bug that prevented the thief stealing energy weapons.
+* Prevented undefined behaviour when guidebot cannot reach its goal object (Github issue #232).
+* Prevented undefined behaviour when reading demos written by old versions of Descent 2.  Old demos recorded trigger transition events even when no trigger was hit (Github issue #177).
+* Prevented undefined behaviour advancing to a new level while dead (Github issue #61).
+* Added diagnostic to report levels which try to trigger a robot materialization center where none exists.  Level authors should modify the level to fix the trigger.
+* The command line parser will now reject invalid command line arguments.  Previously, they were silently ignored, which could confuse users who misspelled an option (or relied on an option that was later removed or renamed).
+* Mission parser now allows comments in more places.  This fixes loading chaos.hog (Github issue #203).
+* In multiplayer games, the host can now specify players start with a higher laser level, other primary weapons, or powerups.  The host cannot grant additional secondary weapons in this way.
+  * Weapons granted in this way cannot be dropped voluntarily (through Shift-F5) and are not ejected when the ship is destroyed.  However, ships receive the granted items on every spawn, so these items are not lost on death.
+* In multiplayer cooperative games, players can now choose to see the missile camera view of missiles fired by other players.  The game will still prefer a player's own missile camera over the camera of an ally.
+* In multiplayer cooperative games, players can now drop four markers each, not two.  The game has always allocated space for a total of 16 markers, so that each of the 8 players in a competitive game can have two markers.  Cooperative games permit only four players, so each player can be given more markers without requiring additional storage.
+  * This causes a slight incompatibility with old save games, whereby loading an old game reassigns markers downward.  No data corruption occurs, and the feature is of sufficient value that this minor breaking change is considered worthwhile.
+* Players can now choose to have auto-select be deferred if a weapon is grabbed while firing.  Previously, the choices were to skip the auto-select entirely or to perform it immediately (Github issue #97).
+* In multiplayer games, the host can now choose respawn invulnerability as a range from 0 to 4 seconds, in 0.5 second increments; previously, it was 0 seconds or 2 seconds, with no other choices (Github issue #99).
+* In multiplayer anarchy games, the host can now configure the game to prefer to spawn players at sites farther from the currently live players (Github issue #108).
+* In multiplayer games, the host can now choose to duplicate preplaced primary weapons, secondary weapons, or powerups.
+* Added experimental support for uncapped ship turning (yawing, pitching, and rolling), popularly known as mouselook.  This is runtime-disabled by default.  Players who wish to use it must enable it in Options -> Controls under the heading "Uncapped Turning In:".  Separate knobs are provided for single player, multiplayer cooperative, and multiplayer anarchy.  For multiplayer games, mouselook must also be enabled by the host in "Game Setup" -> "Advanced Netgame Options" -> "Misc. Options" as "Allow coop mouselook" or "Allow anarchy mouselook", depending on game type.  For this feature, any multiplayer game other than cooperative is considered anarchy: "Anarchy", "Team Anarchy", "Robo-Anarchy", "Capture the Flag", and "Hoard", and "Bounty" are all grouped as "anarchy" since all those modes are competitive against other players.  If the host does not enable mouselook in the game setup menu, no players in that game will be permitted to use mouselook.  A host may permit mouselook for guests while keeping its own controls set to non-mouselook mode.  Although the feature is popularly known as mouselook, the implementation controls turning for all input types: keyboard, mouse, and joystick.
+* Added experimental support for shuffling powerups in non-cooperative games.  Shuffling must be enabled by the host in Advanced Netgame Options.  When enabled, all powerups are randomly shuffled at level startup.  For this purpose, hostages are not considered powerups and do not participate in the shuffle process, even though anarchy converts hostages into shields before play begins.
+* Added experimental briefing directive to show Descent 1 style rotating robots, rather than Descent 2 style robot movies.  Invoke with a line consisting solely of "$:Rebirth.rotate.robot N" or "$:$F:Rebirth.rotate.robot N" where N is the decimal index of the robot to show, and all other characters must be present as shown.  The first form is visible to legacy clients.  The second form abuses a parsing defect in legacy clients to hide the unknown directive, at the expense of toggling the blinking cursor.  Use a regular "$F" on an adjacent line to reverse the toggle.
+* Players protected by spawn invulnerability are now able to acquire an invulnerability powerup, which will upgrade their invulnerability time from the 0.5-4.0 seconds of spawn invulnerability to the full 30 seconds of an invulnerability powerup.  Previously, a player protected by spawn invulnerability was not allowed to acquire an invulnerability powerup and instead received the error "You already are Invulnerable!"; players protected by an invulnerability powerup are still prohibited from collecting a new one until the old one runs out.
+* Drastically improved positional accuracy and less latency in Multiplayer games.
+* Revamped powerup management in Multiplayer which properly handles and prevents loss and excess of powerups.
+* Important packets in Multiplayer are handled in proper order, fixing a multitude of packet-loss related issues.
+* A plethora of new Multiplayer options. [Thanks to the Retro team, A Future Pilot and many more]
+* Proper chaff effect for bombs in D2X-Rebirth Multiplayer as intended in the original game but never implemented correctly.
+* Headlights on player ships will now properly render according to headlight state of the player.
+* "Bright Players" Multiplayer option will now only affect players instead of all polygon models.
+* Improved thief bot to (hopefully) work more accurate in Multiplayer.
+* New Multiplayer GAME INFO screen that can be toggled ingame, too.
+* Proximity Bomb spin variance logic now applies also to Smart Mines and pre-placed mines.
+* Hoard mode no longer borrows the Proximity Bomb slot for counting player orbs; Proximity Bomb powerups can now be found and used correctly in Hoard mode.
+* Fixed some Multiplayer scoring oddities.
+* Fixed original game bug that prevented markers from spinning.  Markers were given a spin rate, but their type did not use that field, so they did not spin.  Markers now spin, and their spin varies based on an internal identifier, so different markers will spin in different directions and orientations.
+* Fixed original game bug that could cause a test for a trigger to produce the wrong result.
+* New SP (Options->Gameplay) / MP (Host Game -> Game Setup -> Advanced) options to remove the thief during level load and to restore the thief energy weapon bug.
+* Command line option `-tmap` was specific to SDL-only builds and had no effect in OpenGL-enabled builds.  It is no longer accepted by OpenGL builds.
+* Added experimental support for libADLMIDI [contributed by jpcima].
+  - Users must separately install a compatible libADLMIDI library on the library search path.
+* ... and many, many more bugfixes and improvements.
+* Fixed original bug that buddy was limited to 5 hints per program run, not 5 per boss as it probably should have been.
+  - Due to savegame format limitations, this still is not right.  Reloading the game should restore Buddy_gave_hint_count to its value at save time, but will not.
+* Fixed bug that buddy's determination of when to give the next hint was never reset.  A player who received a hint late in a level, then advanced to a new level and fought another hit-from-behind boss would not be eligible for a hint until late in the new level.  A player who saved on the new level, restarted the program, and loaded the saved game, would be eligible without waiting.  Reset the timer when reloading buddy state.  This is still wrong, but less so.  Fixing it properly requires a savegame format change.
+
+Known issues
+------------
+* On Windows the mouse is not correctly released if using ALT+TAB to minimize the game. This is not a bug in the program but rather the SDL library. It can be worked around by pausing the game and using ALT+ENTER to get the game to windowed mode. The mouse should not be stuck then anymore.
+* Mac builds may suffer from crashes (or other random glitches) when playing MIDI music. This is not a bug in the program but rather an issue in timidity which SDL_mixer uses to play these files. Using a Soundtrack AddOn (which contains OGG files) should fix that problem.

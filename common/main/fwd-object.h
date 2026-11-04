@@ -1,0 +1,322 @@
+/*
+ * Portions of this file are copyright Rebirth contributors and licensed as
+ * described in COPYING.txt.
+ * Portions of this file are copyright Parallax Software and licensed
+ * according to the Parallax license.
+ * See COPYING.txt for license details.
+ */
+
+#pragma once
+
+#include <type_traits>
+#include "dsx-ns.h"
+#include "objnum.h"
+#include "fwd-piggy.h"
+#include "fwd-vecmat.h"
+#include "fwd-segment.h"
+#include "fwd-window.h"
+#include "fwd-valptridx.h"
+#include "polyobj.h"
+#include <array>
+#include <bitset>
+
+namespace dcx {
+
+// Movement types
+constexpr std::integral_constant<std::size_t, 350> MAX_OBJECTS{};
+constexpr std::integral_constant<std::size_t, MAX_OBJECTS - 20> MAX_USED_OBJECTS{};
+struct d_level_unique_control_center_state;
+
+// Render types
+enum class render_type : uint8_t;
+
+/* To reliably disambiguate results, the left object's type must be multiplied
+ * by at least `MAX_OBJECT_TYPES`, since any lesser multiplier would allow two
+ * different `object_type` pairs to yield the same index in the lookup table.
+ * However, a larger multiplier is legal, at the price of leaving unused
+ * elements in the table.  Therefore, for efficient math, both games will
+ * multiply by 16 (`d2x::MAX_OBJECT_TYPES`).  This is the minimum required
+ * multiplier in D2X, and only leaves minor holes in D1X.
+ *
+ * The highest valid index is
+ * `((MAX_OBJECT_TYPES - 1) * multiplier) + (MAX_OBJECT_TYPES - 1)`,
+ * which would be required when testing a collision between two objects of the
+ * highest legal type.  d1x::MAX_OBJECT_TYPES = 15, which would
+ * produce a `(14 * 16) + 14` = 238, so D1X needs at least `std::bitset<239>`,
+ * so that `CollisionResult[238]` is valid.  d2x::MAX_OBJECT_TYPES = 16, which
+ * would produce `(15 * 16) + 15` = 255, so D2X needs at least
+ * `std::bitset<256>`.
+ *
+ * gcc libstdc++ `bitset` uses `long` internally, so on 64-bit systems,
+ * `bitset<N>` needs `long[ceil(N / 64)]` of storage.  `bitset<239>` needs
+ * `long[ceil(3.734375)]` = `long[4]`.  `bitset<256>` needs `long[ceil(4)]` =
+ * `long[4]`, so `bitset<239>` would not save any space over using
+ * `bitset<256>`.  Therefore, use `std::bitset<256>` in both games.
+ */
+extern const std::bitset<256> CollisionResult;
+
+}
+
+#ifdef DXX_BUILD_DESCENT
+namespace dsx {
+struct object;
+struct d_level_unique_object_state;
+}
+DXX_VALPTRIDX_DECLARE_SUBTYPE(dsx::, object, objnum_t, MAX_OBJECTS);
+
+namespace dsx {
+DXX_VALPTRIDX_DEFINE_SUBTYPE_TYPEDEFS(object, obj);
+
+static constexpr valptridx<object>::magic_constant<objnum_t{0xffff}> object_none{};
+static constexpr valptridx<object>::magic_constant<objnum_t{0}> object_first{};
+
+#if DXX_BUILD_DESCENT == 1
+constexpr uint8_t MAX_OBJECT_TYPES{15};
+#elif DXX_BUILD_DESCENT == 2
+constexpr uint8_t MAX_OBJECT_TYPES{16};
+struct d_level_unique_control_center_state;
+#endif
+
+}
+#endif
+
+// misc object flags
+typedef unsigned object_flag_t;
+constexpr std::integral_constant<object_flag_t, 1> OF_EXPLODING{};   // this object is exploding
+constexpr std::integral_constant<object_flag_t, 2> OF_SHOULD_BE_DEAD{};   // this object should be dead, so next time we can, we should delete this object.
+constexpr std::integral_constant<object_flag_t, 4> OF_DESTROYED{};   // this has been killed, and is showing the dead version
+constexpr std::integral_constant<object_flag_t, 8> OF_SILENT{};   // this makes no sound when it hits a wall.  Added by MK for weapons, if you extend it to other types, do it completely!
+constexpr std::integral_constant<object_flag_t, 16> OF_ATTACHED{};  // this object is a fireball attached to another object
+#ifdef DXX_BUILD_DESCENT
+#if DXX_BUILD_DESCENT == 2
+constexpr std::integral_constant<object_flag_t, 64> OF_PLAYER_DROPPED{};  // this object was dropped by the player...
+#endif
+#endif
+
+// physics flags
+typedef unsigned physics_flag_t;
+constexpr std::integral_constant<physics_flag_t, 0x01> PF_TURNROLL{};    // roll when turning
+constexpr std::integral_constant<physics_flag_t, 0x02> PF_LEVELLING{};    // level object with closest side
+constexpr std::integral_constant<physics_flag_t, 0x04> PF_BOUNCE{};    // bounce (not slide) when hit will
+constexpr std::integral_constant<physics_flag_t, 0x08> PF_WIGGLE{};    // wiggle while flying
+constexpr std::integral_constant<physics_flag_t, 0x10> PF_STICK{};    // object sticks (stops moving) when hits wall
+constexpr std::integral_constant<physics_flag_t, 0x20> PF_PERSISTENT{};    // object keeps going even after it hits another object (eg, fusion cannon)
+constexpr std::integral_constant<physics_flag_t, 0x40> PF_USES_THRUST{};    // this object uses its thrust
+#ifdef DXX_BUILD_DESCENT
+#if DXX_BUILD_DESCENT == 2
+constexpr std::integral_constant<physics_flag_t, 0x80> PF_BOUNCED_ONCE{};    // Weapon has bounced once.
+constexpr std::integral_constant<physics_flag_t, 0x100> PF_FREE_SPINNING{};   // Drag does not apply to rotation of this object
+constexpr std::integral_constant<physics_flag_t, 0x200> PF_BOUNCES_TWICE{};   // This weapon bounces twice, then dies
+#endif
+#endif
+
+namespace dcx {
+enum object_type : uint8_t;
+struct object_base;
+
+typedef unsigned powerup_flag_t;
+constexpr std::integral_constant<powerup_flag_t, 1> PF_SPAT_BY_PLAYER{};   //this powerup was spat by the player
+
+constexpr std::integral_constant<unsigned, 0x3fffffff> IMMORTAL_TIME{};  // Time assigned to immortal objects, about 32768 seconds, or about 9 hours.
+
+struct shortpos;
+struct quaternionpos;
+
+// This is specific to the shortpos extraction routines in gameseg.c.
+constexpr std::integral_constant<unsigned, 10> RELPOS_PRECISION{};
+constexpr std::integral_constant<unsigned, 9> MATRIX_PRECISION{};
+
+struct physics_info;
+struct physics_info_rw;
+
+struct laser_parent;
+struct laser_info_rw;
+
+struct explosion_info;
+struct explosion_info_rw;
+
+struct light_info;
+struct light_info_rw;
+
+struct powerup_info;
+
+struct vclip_info;
+struct vclip_info_rw;
+
+struct polyobj_info;
+struct polyobj_info_rw;
+
+struct obj_position;
+
+enum class collision_result : bool
+{
+	ignore = 0,	// Ignore this collision
+	check = 1,	// Check for this collision
+};
+
+}
+
+#ifdef DXX_BUILD_DESCENT
+namespace dsx {
+
+#if DXX_BUILD_DESCENT == 1
+constexpr std::size_t MAX_CONTROLCEN_GUNS{4};
+#elif DXX_BUILD_DESCENT == 2
+constexpr std::size_t MAX_CONTROLCEN_GUNS{8};
+struct d_unique_buddy_state;
+#endif
+
+struct object_rw;
+struct powerup_info_rw;
+struct window_rendered_data;
+struct reactor_static;
+
+}
+#endif
+
+namespace dcx {
+extern int Num_robot_types;
+}
+
+#ifdef DXX_BUILD_DESCENT
+namespace dsx {
+extern object *ConsoleObject;       // pointer to the object that is the player
+extern const object *Viewer;              // which object we are seeing from
+extern object *Dead_player_camera;
+}
+#endif
+
+enum class player_dead_state : uint8_t
+{
+	no,
+	yes,
+	exploded,
+};
+
+namespace dcx {
+
+extern player_dead_state Player_dead_state;          // !0 means player is dead!
+extern objnum_t Player_fired_laser_this_frame;
+
+// create quaternion structure from object data which greatly saves bytes by using quaternion instead or orientation matrix
+[[nodiscard]]
+quaternionpos build_quaternionpos(const object_base &objp);
+
+// Extract information from an object (objp->orient, objp->pos,
+// objp->segnum), stuff in a shortpos structure.  See typedef
+// shortpos.
+[[nodiscard]]
+shortpos create_shortpos_native(const d_level_shared_segment_state &, const object_base &objp);
+
+}
+
+#ifdef DXX_BUILD_DESCENT
+namespace dsx {
+// Draw a blob-type object, like a fireball
+void draw_object_blob(GameBitmaps_array &GameBitmaps, const object_base &Viewer, grs_canvas &, const object_base &obj, bitmap_index bitmap);
+
+// do whatever setup needs to be done
+void init_objects();
+
+// when an object has moved into a new segment, this function unlinks it
+// from its old segment, and links it into the new segment
+void obj_relink(fvmobjptr &vmobjptr, fvmsegptr &vmsegptr, vmobjptridx_t objnum, vmsegptridx_t newsegnum);
+
+// for getting out of messed up linking situations (i.e. caused by demo playback)
+void obj_relink_all();
+
+/* Link an object without checking whether the object is currently
+ * unlinked.  This should be used only in cases where the caller is
+ * intentionally overriding the normal linking rules (such as loading
+ * objects from demos or from the network).
+ */
+void obj_link_unchecked(fvmobjptr &vmobjptr, vmobjptridx_t obj, vmsegptridx_t segnum);
+
+// unlinks an object from a segment's list of objects
+void obj_unlink(fvmobjptr &vmobjptr, fvmsegptr &vmsegptr, object_base &obj);
+
+// make a copy of an object. returs num of new object
+imobjptridx_t obj_create_copy(const object &srcobj, vmsegptridx_t newsegnum);
+
+// remove object from the world
+void obj_delete(d_level_unique_object_state &LevelUniqueObjectState, segment_array &Segments, vmobjptridx_t objnum);
+
+// called after load.  Takes number of objects, and objects should be
+// compressed
+void reset_objects(d_level_unique_object_state &, unsigned n_objs);
+
+#if DXX_USE_EDITOR
+// make object array non-sparse
+void compress_objects();
+#endif
+
+// set viewer object to next object in array
+void object_goto_next_viewer(const object_array &Objects, const object *&viewer);
+
+// make object0 the player, setting all relevant fields
+void init_player_object(const d_level_shared_polygon_model_state &LevelSharedPolygonModelState, object_base &console);
+
+// check if object is in object->segnum.  if not, check the adjacent
+// segs.  if not any of these, returns false, else sets obj->segnum &
+// returns true callers should really use find_vector_intersection()
+// Note: this function is in gameseg.c
+int update_object_seg(fvmobjptr &vmobjptr, const d_level_shared_segment_state &LevelSharedSegmentState, d_level_unique_segment_state &LevelUniqueSegmentState, vmobjptridx_t obj);
+
+// Finds what segment *obj is in, returns segment number.  If not in
+// any segment, returns -1.  Note: This function is defined in
+// gameseg.h, but object.h depends on gameseg.h, and object.h is where
+// object is defined...get it?
+imsegptridx_t find_object_seg(const d_level_shared_segment_state &, d_level_unique_segment_state &, const object_base &obj);
+
+// go through all objects and make sure they have the correct segment
+// numbers used when debugging is on
+void fix_object_segs();
+
+void dead_player_end();
+
+#if DXX_USE_MULTIPLAYER
+#if DXX_BUILD_DESCENT == 2
+// Extract information from a shortpos, stuff in objp->orient
+// (matrix), objp->pos, objp->segnum
+void multi_object_warp_to_shortpos(vmobjptridx_t objp, const shortpos &spp);
+#endif
+
+// reset object position from quaternion structure
+void extract_quaternionpos(fvmobjptr &vmobjptr, fvmsegptr &vmsegptr, vmobjptridx_t objp, quaternionpos &qpp);
+#endif
+
+// delete objects, such as weapons & explosions, that shouldn't stay
+// between levels if clear_all is set, clear even proximity bombs
+void clear_transient_objects(int clear_all);
+
+// returns the number of a free object, updating Highest_object_index.
+// Generally, obj_create() should be called to get an object, since it
+// fills in important fields and does the linking.  returns -1 if no
+// free objects
+[[nodiscard]]
+imobjptridx_t obj_allocate(d_level_unique_object_state &);
+
+// attaches an object, such as a fireball, to another object, such as
+// a robot
+void obj_attach(object_array &Objects, vmobjptridx_t parent, vmobjptridx_t sub);
+
+void create_small_fireball_on_object(vmobjptridx_t objp, fix size_scale, int sound_flag);
+
+#if DXX_BUILD_DESCENT == 2
+extern int Drop_afterburner_blob_flag;		//ugly hack
+enum class game_marker_index : uint8_t;
+enum class player_marker_index : uint8_t;
+// returns object number
+imobjptridx_t drop_marker_object(const vms_vector &pos, vmsegptridx_t segnum, const vms_matrix &orient, game_marker_index marker_num);
+
+void wake_up_rendered_objects(const object &gmissp, window_rendered_data &window);
+
+void fuelcen_check_for_goal(object &plrobj, const shared_segment &segp);
+#endif
+imobjptridx_t obj_find_first_of_type(fvmobjptridx &, object_type type);
+
+void object_rw_swap(struct object_rw *obj_rw, physfsx_endian swap);
+void reset_player_object(object_base &);
+
+}
+#endif

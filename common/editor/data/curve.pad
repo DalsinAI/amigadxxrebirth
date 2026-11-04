@@ -1,0 +1,29 @@
+Curve Forming Functions
+ÚÄÄÄÄÄÄÄÄÂÄÄÄÄÄÄÄÄÂÄÄÄÄÄÄÄÄÂÄÄÄÄÄÄÄÄ¿
+³ Num    ³ /      ³ *      ³ -      ³
+³ Lock   ³        ³        ³        ³
+³        ³        ³        ³        ³
+ÃÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄ´
+³Decrease³ 8      ³Increase³        ³
+³   R1   ³       ³   R1   ³        ³
+³        ³        ³        ³        ³
+ÃÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄ´ +      ³
+³Decrease³ 5      ³Increase³        ³
+³   R4   ³        ³   R4   ³        ³
+³        ³        ³        ³        ³
+ÃÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄ´
+³ 1      ³ 2      ³ 3      ³        ³
+³ End    ³       ³ PgDn   ³        ³
+³        ³        ³        ³ Create ³
+ÃÄÄÄÄÄÄÄÄÁÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄ´ Curve  ³
+³ Set             ³ Delete ³        ³
+³ Curve           ³ Curve  ³        ³
+³                 ³        ³        ³
+ÀÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÁÄÄÄÄÄÄÄÄÁÄÄÄÄÄÄÄÄÙ
+{Ctrl}{PadEnter}		med-curve-generate
+{Ctrl}{Pad.}		med-curve-delete
+{Ctrl}{Pad7}		med-curve-decrease-r1
+{Ctrl}{Pad9}		med-curve-increase-r1
+{Ctrl}{Pad4}		med-curve-decrease-r4
+{Ctrl}{Pad6}		med-curve-increase-r4
+{Ctrl}{Pad0}		med-curve-set

@@ -1,0 +1,2090 @@
+/*
+ * Portions of this file are copyright Rebirth contributors and licensed as
+ * described in COPYING.txt.
+ * Portions of this file are copyright Parallax Software and licensed
+ * according to the Parallax license below.
+ * See COPYING.txt for license details.
+
+THE COMPUTER CODE CONTAINED HEREIN IS THE SOLE PROPERTY OF PARALLAX
+SOFTWARE CORPORATION ("PARALLAX").  PARALLAX, IN DISTRIBUTING THE CODE TO
+END-USERS, AND SUBJECT TO ALL OF THE TERMS AND CONDITIONS HEREIN, GRANTS A
+ROYALTY-FREE, PERPETUAL LICENSE TO SUCH END-USERS FOR USE BY SUCH END-USERS
+IN USING, DISPLAYING,  AND CREATING DERIVATIVE WORKS THEREOF, SO LONG AS
+SUCH USE, DISPLAY OR CREATION IS FOR NON-COMMERCIAL, ROYALTY OR REVENUE
+FREE PURPOSES.  IN NO EVENT SHALL THE END-USER USE THE COMPUTER CODE
+CONTAINED HEREIN FOR REVENUE-BEARING PURPOSES.  THE END-USER UNDERSTANDS
+AND AGREES TO THE TERMS HEREIN AND ACCEPTS THE SAME BY USE OF THIS FILE.
+COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
+*/
+
+/*
+ *
+ * Routines to configure keyboard, joystick, etc..
+ *
+ */
+
+#include <algorithm>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
+#include <ctype.h>
+#include <cstddef>
+#include <stdexcept>
+#include <functional>
+#include <limits>
+
+#include "dxxerror.h"
+#include "pstypes.h"
+#include "gr.h"
+#include "window.h"
+#include "console.h"
+#include "palette.h"
+#include "physfsx.h"
+#include "game.h"
+#include "gamefont.h"
+#include "u_mem.h"
+#include "kconfig.h"
+#include "digi.h"
+#include "key.h"
+#include "mouse.h"
+#include "newmenu.h"
+#include "multi.h"
+#include "timer.h"
+#include "text.h"
+#include "player.h"
+#include "args.h"
+#include "playsave.h"
+#include "screens.h"
+
+#include "d_array.h"
+#include "d_enumerate.h"
+#include "d_range.h"
+#include "d_zip.h"
+
+using std::min;
+using std::max;
+using std::plus;
+using std::minus;
+
+namespace dcx {
+
+// Array used to 'blink' the cursor while waiting for a keypress.
+const std::array<int8_t, 64> fades{{
+	1,1,1,2,2,3,4,4,5,6,8,9,10,12,13,15,
+	16,17,19,20,22,23,24,26,27,28,28,29,30,30,31,31,
+	31,31,31,30,30,29,28,28,27,26,24,23,22,20,19,17,
+	16,15,13,12,10,9,8,6,5,4,4,3,2,2,1,1
+}};
+
+const std::array<char[2], 2> invert_text{{"N", "Y"}};
+#if DXX_MAX_JOYSTICKS
+joybutton_text_t joybutton_text;
+#endif
+#if DXX_MAX_AXES_PER_JOYSTICK
+joyaxis_text_t joyaxis_text;
+#endif
+constexpr char mouseaxis_text[][8] = { "L/R", "F/B", "WHEEL" };
+constexpr char mousebutton_text[][8] = { "LEFT", "RIGHT", "MID", "M4", "M5", "M6", "M7", "M8", "M9", "M10","M11","M12","M13","M14","M15","M16" };
+
+const std::array<uint8_t, 19> system_keys{{
+	KEY_ESC, KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12, KEY_MINUS, KEY_EQUAL, KEY_PRINT_SCREEN,
+	// KEY_*LOCK should always be last since we wanna skip these if -nostickykeys
+	KEY_CAPSLOCK, KEY_SCROLLOCK, KEY_NUMLOCK
+}};
+
+fix Cruise_speed{0};
+
+#define INFO_Y (214)
+
+constexpr enumerated_array<uint8_t, MAX_DXX_REBIRTH_CONTROLS, dxx_kconfig_ui_kc_rebirth> DefaultKeySettingsRebirth{{{
+	0x2, 0xff, 0xff,
+	0x3, 0xff, 0xff,
+	0x4, 0xff, 0xff,
+	0x5, 0xff, 0xff,
+	0x6, 0xff, 0xff,
+	0x7, 0xff, 0xff,
+	0x8, 0xff, 0xff,
+	0x9, 0xff, 0xff,
+	0xa, 0xff, 0xff,
+	0xb, 0xff, 0xff
+}}};
+
+void kconfig_begin_loop(control_info &Controls)
+{
+	Controls.pitch_time = Controls.vertical_thrust_time = Controls.heading_time = Controls.sideways_thrust_time = Controls.bank_time = Controls.forward_thrust_time = 0;
+	Controls.pending_mouse_delta.reset();
+}
+
+namespace {
+
+#if DXX_MAX_JOYSTICKS
+#if SDL_MAJOR_VERSION == 2
+// GameController axis-as-button indices for use in default key settings
+constexpr unsigned GC_AXIS_BUTTON(unsigned axis_id) { return SDL_CONTROLLER_BUTTON_MAX + (axis_id * 2); }
+#endif
+#endif
+
+struct kc_mitem {
+	uint8_t oldvalue;
+	uint8_t value;		// what key,button,etc
+};
+
+enum class kc_type : uint8_t
+{
+	key = 0,
+	mouse_button = 1,
+	mouse_axis = 2,
+	joy_button = 3,
+	joy_axis = 4,
+	invert = 5,
+};
+
+enum kc_state : uint8_t
+{
+	STATE_NONE = 0,
+	STATE_BIT1 = 1,
+	STATE_BIT2 = 2,
+	STATE_BIT3 = 4,
+	STATE_BIT4 = 8,
+	STATE_BIT5 = 16,
+};
+
+static void kc_drawquestion(grs_canvas &canvas, const grs_font &cv_font, uint8_t &menu_fade_index, const short item_xinput, const short item_y, const int8_t item_w2, const color_palette_index color)
+{
+	if (++ menu_fade_index > 63)
+		menu_fade_index = 0;
+	const auto &&[w, h] = gr_get_string_size(cv_font, "?");
+	const auto &&fspacx = FSPACX();
+	const auto &&fspacy = FSPACY();
+	const auto &&fspacx_item_xinput = fspacx(item_xinput);
+	const auto &&fspacy_item_y = fspacy(item_y);
+	gr_urect(canvas, fspacx_item_xinput, fspacy(item_y - 1), fspacx(item_xinput + item_w2), fspacy_item_y + h, color);
+	gr_set_fontcolor(canvas, BM_XRGB(28, 28, 28), -1);
+	const auto x = fspacx_item_xinput + ((fspacx(item_w2) - w) / 2);
+	gr_string(canvas, cv_font, x, fspacy_item_y, "?", w, h);
+}
+
+}
+
+}
+
+namespace dsx {
+
+control_info Controls;
+
+namespace {
+
+#define kc_item kc_item
+struct kc_item
+{
+	const short x, y;              // x, y pos of label
+	const short xinput;                // x pos of input field
+	const int8_t w2;                // length of input field
+	const uint8_t u,d,l,r;           // neighboring field ids for cursor navigation
+	const kc_type type;
+	const kc_state state_bit;
+	union {
+		uint8_t control_info::state_controls_t::*const ci_state_ptr;
+		uint8_t control_info::state_controls_t::*const ci_count_ptr;
+	};
+};
+
+struct kc_menu : window
+{
+	using window::window;
+	const char *litems;
+	const kc_item	*items;
+	kc_mitem	*mitems;
+	const char	*title;
+	unsigned	nitems;
+	unsigned citem{0};
+	uint8_t changing{0};
+	ubyte	q_fade_i;	// for flashing the question mark
+	uint8_t mouse_state{0};
+	std::array<int, 3>	old_maxis;
+#if DXX_MAX_AXES_PER_JOYSTICK
+	std::array<int, JOY_MAX_AXES>	old_jaxis;
+#endif
+#if DXX_MAX_BUTTONS_PER_JOYSTICK || DXX_MAX_HATS_PER_JOYSTICK
+#if SDL_MAJOR_VERSION == 2
+	fix64 start_press_time{0};	// timestamp of Start button press for long-press detection
+#endif
+#endif
+	virtual window_event_result event_handler(const d_event &) override;
+};
+
+}
+
+constexpr struct player_config::KeySettings DefaultKeySettings{
+	/* Keyboard */ {{{
+		// Pitch forward
+		KEY_UP, KEY_PAD8,
+		// Pitch backward
+		KEY_DOWN, KEY_PAD2,
+		// Turn left
+		KEY_LEFT, KEY_PAD4,
+		// Turn right
+		KEY_RIGHT, KEY_PAD6,
+		// Slide on
+		KEY_LALT, 0xff,
+		// Slide left
+		KEY_A, KEY_PAD1,
+		// Slide right
+		KEY_D, KEY_PAD3,
+		// Slide up
+		KEY_C, KEY_PADMINUS,
+		// Slide down
+		KEY_X, KEY_PADPLUS,
+		// Bank on
+		0xff, 0xff,
+		// Bank left
+		KEY_Q, KEY_PAD7,
+		// Bank right
+		KEY_E, KEY_PAD9,
+		// Fire primary
+		KEY_LCTRL, KEY_RCTRL,
+		// Fire secondary
+		KEY_SPACEBAR, 0xff,
+		// Fire flare
+		KEY_F, 0xff,
+		// Accelerate
+		KEY_W, 0xff,
+		// Reverse
+		KEY_S, 0xff,
+		// Drop bomb
+		KEY_B, 0xff,
+		// Rear view
+		KEY_R, 0xff,
+		// Cruise plus
+		0xff, 0xff,
+		// Cruise minus
+		0xff, 0xff,
+		// Cruise off
+		0xff, 0xff,
+		// Automap
+		KEY_TAB, 0xff,
+#if DXX_BUILD_DESCENT == 1
+		// Cycle primary
+		KEY_COMMA, 0x0,
+		// Cycle secondary
+		KEY_PERIOD, 0x0,
+#elif DXX_BUILD_DESCENT == 2
+		// Afterburner
+		KEY_LSHIFT, 0xff,
+		// Cycle primary
+		KEY_COMMA, 0xff,
+		// Cycle secondary
+		KEY_PERIOD, 0xff,
+		// Headlight
+		KEY_H, 0xff,
+		// Converter
+		KEY_T, 0xff,
+		// Toggle bomb
+		0xff, 0xff,
+		0x0, 0x0
+#endif
+	}}},
+#if DXX_MAX_JOYSTICKS
+	{{{
+		/* SDL raw joystick defaults (hardware-dependent button indices).  This
+		 * is used if the player has a joystick that is not considered a
+		 * gamecontroller.  For gamecontrollers, this will be ignored, and the
+		 * settings in `DefaultKeySettingsGameController` used instead.
+		 */
+		// Fire primary
+		0x0,
+		// Fire secondary
+		0x1,
+		// Accelerate
+		0xff,
+		// Reverse
+		0xff,
+		// Fire flare
+		0xff,
+		// Slide on
+		0xff,
+		// Slide left
+		0xff,
+		// Slide right
+		0xff,
+		// Slide up
+		0xff,
+		// Slide down
+		0xff,
+		// Bank on
+		0xff,
+		// Bank left
+		0xff,
+		// Bank right
+		0xff,
+		/* Begin axis+invert block.  Axes are indexed separately from buttons,
+		 * so button 0 above and axis 0 here are not the same input on the
+		 * device.
+		 *
+		 * Invert entries are true/false whether to invert the sense of the
+		 * corresponding axis, rather than being an index into the buttons or
+		 * the axes.
+		 */
+		// Pitch up/down
+		0x1,
+		// Invert pitch
+		0x0,
+		// Turn left/right
+		0x0,
+		// Invert turn
+		0x0,
+		// Slide left/right
+		0xff,
+		// Invert slide left/right
+		0x0,
+		// Slide up/down
+		0xff,
+		// Invert slide up/down
+		0x0,
+		// Bank left/right
+		0xff,
+		// Invert bank left/right
+		0x0,
+		// Throttle
+		0xff,
+		// Invert throttle
+		0x0,
+		/* End axis+invert block. */
+		// Rear view
+		0xff,
+		// Drop bomb
+		0xff,
+#if DXX_BUILD_DESCENT == 1
+		// Automap
+		0xff, 0xff,
+#elif DXX_BUILD_DESCENT == 2
+		// Afterburner
+		0xff,
+		// Cycle primary
+		0xff,
+		// Cycle secondary
+		0xff,
+		// Headlight
+		0xff,
+#endif
+		// Fire primary (second binding)
+		0xff,
+		// Fire secondary (second binding)
+		0xff,
+		// Accelerate (second binding)
+		0xff,
+		// Reverse (second binding)
+		0xff,
+		// Fire flare (second binding)
+		0xff,
+		// Slide on (second binding)
+		0xff,
+		// Slide left (second binding)
+		0xff,
+		// Slide right (second binding)
+		0xff,
+		// Slide up (second binding)
+		0xff,
+		// Slide down (second binding)
+		0xff,
+		// Bank on (second binding)
+		0xff,
+		// Bank left (second binding)
+		0xff,
+		// Bank right (second binding)
+		0xff,
+		// Rear view (second binding)
+		0xff,
+		// Drop bomb (second binding)
+		0xff,
+#if DXX_BUILD_DESCENT == 1
+		// Cycle primary
+		0xff,
+		// Cycle secondary
+		0xff,
+#elif DXX_BUILD_DESCENT == 2
+		// Afterburner (second binding)
+		0xff,
+#endif
+		// Cycle primary (second binding)
+		0xff,
+		// Cycle secondary (second binding)
+		0xff,
+#if DXX_BUILD_DESCENT == 2
+		// Headlight (second binding)
+		0xff,
+		// Automap
+		0xff, 0xff,
+		// Converter
+		0xff, 0xff,
+		// Toggle bomb
+		0xff, 0xff,
+#endif
+		// Menu
+		0xff, 0xff
+	}}},
+#endif
+	/* Mouse */ {{{
+		// Fire primary
+		0x0,
+		// Fire secondary
+		0x1,
+		// Accelerate
+		0xff,
+		// Reverse
+		0xff,
+		// Fire flare
+		0xff,
+		// Slide on
+		0xff,
+		// Slide left
+		0xff,
+		// Slide right
+		0xff,
+		// Slide up
+		0xff,
+		// Slide down
+		0xff,
+		// Bank on
+		0xff,
+		// Bank left
+		0xff,
+		// Bank right
+		0xff,
+		// Pitch up/down
+		0x1,
+		// Invert pitch
+		0x0,
+		// Turn left/right
+		0x0,
+		// Invert turn
+		0x0,
+		// Slide left/right
+		0xff,
+		// Invert slide left/right
+		0x0,
+		// Slide up/down
+		0xff,
+		// Invert slide up/down
+		0x0,
+		// Bank left/right
+		0xff,
+		// Invert bank left/right
+		0x0,
+		// Throttle
+		0xff,
+		// Invert throttle
+		0x0,
+		// Rear view
+		0xff,
+		// Drop bomb
+		0xff,
+#if DXX_BUILD_DESCENT == 2
+		// Afterburner
+		0xff,
+#endif
+		// Cycle primary
+		0xff,
+		// Cycle secondary
+		0xff,
+#if DXX_BUILD_DESCENT == 1
+		0x0,
+		0x0,
+		0x0,
+		0x0,
+		0x0,
+		0x0,
+		0x0,
+		0x0,
+		0x0,
+		0x0,
+		0x0,
+		0x0,
+		0x0,
+		0x0,
+		0x0,
+		0x0,
+		0x0,
+		0x0,
+		0x0,
+#elif DXX_BUILD_DESCENT == 2
+		/* unused */
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0xff,
+		0x0,
+		0x0,
+		0x0,
+#endif
+	}}}
+};
+
+#if DXX_MAX_JOYSTICKS
+#if SDL_MAJOR_VERSION == 2
+constexpr enumerated_array<uint8_t, MAX_CONTROLS, dxx_kconfig_ui_kc_joystick> DefaultKeySettingsGameController{{{
+	/* SDL2 GameController defaults (standardized button indices)
+	 *  D-pad pitch/turn handled via keyboard key mapping
+	 *
+	 *  Button indices use SDL_CONTROLLER_BUTTON_* constants.
+	 *  Axis-as-button indices use GC_AXIS_BUTTON().
+	 *  Axis assignments use SDL_CONTROLLER_AXIS_* constants.
+	 */
+#if DXX_BUILD_DESCENT == 1
+		// Fire primary
+		GC_AXIS_BUTTON(SDL_CONTROLLER_AXIS_TRIGGERRIGHT),
+		// Fire secondary
+		GC_AXIS_BUTTON(SDL_CONTROLLER_AXIS_TRIGGERLEFT),
+		// Accelerate (unbound, using throttle axis)
+		0xff,
+		// Reverse (unbound, using throttle axis)
+		0xff,
+		// Fire flare
+		SDL_CONTROLLER_BUTTON_Y,
+		// Slide on (unbound)
+		0xff,
+		// Slide left (unbound)
+		0xff,
+		// Slide right (unbound)
+		0xff,
+		// Slide up (unbound)
+		0xff,
+		// Slide down (unbound)
+		0xff,
+		// Bank on (unbound)
+		0xff,
+		// Bank left
+		SDL_CONTROLLER_BUTTON_LEFTSHOULDER,
+		// Bank right
+		SDL_CONTROLLER_BUTTON_RIGHTSHOULDER,
+		// Pitch U/D (inverted)
+		SDL_CONTROLLER_AXIS_RIGHTY, 1,
+		// Turn L/R
+		SDL_CONTROLLER_AXIS_RIGHTX, 0,
+		// Slide L/R
+		SDL_CONTROLLER_AXIS_LEFTX, 0,
+		// Slide U/D (unbound)
+		0xff, 0,
+		// Bank L/R (unbound)
+		0xff, 0,
+		// Throttle
+		SDL_CONTROLLER_AXIS_LEFTY, 0,
+		// Rear view
+		SDL_CONTROLLER_BUTTON_X,
+		// Drop bomb
+		SDL_CONTROLLER_BUTTON_B,
+		// Automap
+		SDL_CONTROLLER_BUTTON_DPAD_DOWN, 0xff,
+		// OR column (unbound)
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+		// Cycle primary
+		SDL_CONTROLLER_BUTTON_DPAD_LEFT,
+		// Cycle secondary
+		SDL_CONTROLLER_BUTTON_DPAD_RIGHT,
+		// OR / remaining (unbound)
+		0xff, 0xff, 0xff, 0xff
+#elif DXX_BUILD_DESCENT == 2
+		// Fire primary
+		GC_AXIS_BUTTON(SDL_CONTROLLER_AXIS_TRIGGERRIGHT),
+		// Fire secondary
+		GC_AXIS_BUTTON(SDL_CONTROLLER_AXIS_TRIGGERLEFT),
+		// Accelerate (unbound, using throttle axis)
+		0xff,
+		// Reverse (unbound, using throttle axis)
+		0xff,
+		// Fire flare
+		SDL_CONTROLLER_BUTTON_Y,
+		// Slide on (unbound)
+		0xff,
+		// Slide left (unbound)
+		0xff,
+		// Slide right (unbound)
+		0xff,
+		// Slide up (unbound)
+		0xff,
+		// Slide down (unbound)
+		0xff,
+		// Bank on (unbound)
+		0xff,
+		// Bank left
+		SDL_CONTROLLER_BUTTON_LEFTSHOULDER,
+		// Bank right
+		SDL_CONTROLLER_BUTTON_RIGHTSHOULDER,
+		// Pitch U/D (inverted)
+		SDL_CONTROLLER_AXIS_RIGHTY, 1,
+		// Turn L/R
+		SDL_CONTROLLER_AXIS_RIGHTX, 0,
+		// Slide L/R
+		SDL_CONTROLLER_AXIS_LEFTX, 0,
+		// Slide U/D (unbound)
+		0xff, 0,
+		// Bank L/R (unbound)
+		0xff, 0,
+		// Throttle
+		SDL_CONTROLLER_AXIS_LEFTY, 0,
+		// Rear view
+		SDL_CONTROLLER_BUTTON_X,
+		// Drop bomb
+		SDL_CONTROLLER_BUTTON_B,
+		// Afterburner
+		SDL_CONTROLLER_BUTTON_A,
+		// Cycle primary
+		SDL_CONTROLLER_BUTTON_DPAD_LEFT,
+		// Cycle secondary
+		SDL_CONTROLLER_BUTTON_DPAD_RIGHT,
+		// Headlight
+		SDL_CONTROLLER_BUTTON_DPAD_UP,
+		// OR column (unbound)
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+		0xff, 0xff, 0xff,
+		// Automap
+		SDL_CONTROLLER_BUTTON_DPAD_DOWN, 0xff,
+		// Energy->Shield (unbound)
+		0xff, 0xff,
+		// Remaining (unbound)
+		0xff, 0xff, 0xff, 0xff, 0xff
+#endif
+}}};
+#endif
+#endif
+
+namespace {
+
+#if DXX_BUILD_DESCENT == 1
+#define D1X_EXTENDED_WEAPON_STRING(X)
+#elif DXX_BUILD_DESCENT == 2
+#define D2X_EXTENDED_WEAPON_STRING(X)	X
+#endif
+
+#define DXX_EXPAND_DSX_MACRO_REPARSE_0(DXX_BUILD_DESCENT,MACRO_NAME,...)	D ## DXX_BUILD_DESCENT ## X_ ## MACRO_NAME(__VA_ARGS__)
+#define DXX_EXPAND_DSX_MACRO(DXX_BUILD_DESCENT,MACRO_NAME,...)	DXX_EXPAND_DSX_MACRO_REPARSE_0(DXX_BUILD_DESCENT, MACRO_NAME, ##__VA_ARGS__)
+
+#define DXX_WEAPON_STRING(TEXT_IF_D2)	DXX_EXPAND_DSX_MACRO(DXX_BUILD_DESCENT, EXTENDED_WEAPON_STRING, TEXT_IF_D2)
+#define DXX_WEAPON_STRING_LASER	DXX_WEAPON_STRING("(SUPER)") "LASER CANNON"
+#define DXX_WEAPON_STRING_VULCAN	"VULCAN" DXX_WEAPON_STRING("/GAUSS") " CANNON"
+#define DXX_WEAPON_STRING_SPREADFIRE	"SPREADFIRE" DXX_WEAPON_STRING("/HELIX") " CANNON"
+#define DXX_WEAPON_STRING_PLASMA	"PLASMA" DXX_WEAPON_STRING("/PHOENIX") " CANNON"
+#define DXX_WEAPON_STRING_FUSION	"FUSION" DXX_WEAPON_STRING("/OMEGA") " CANNON"
+#define DXX_WEAPON_STRING_CONCUSSION	"CONCUSSION" DXX_WEAPON_STRING("/FLASH") " MISSILE"
+#define DXX_WEAPON_STRING_HOMING	"HOMING" DXX_WEAPON_STRING("/GUIDED") " MISSILE"
+#define DXX_WEAPON_STRING_PROXIMITY	"PROXIMITY BOMB" DXX_WEAPON_STRING("/SMART MINE")
+#define DXX_WEAPON_STRING_SMART	"SMART" DXX_WEAPON_STRING("/MERCURY") " MISSILE"
+#define DXX_WEAPON_STRING_MEGA	"MEGA" DXX_WEAPON_STRING("/EARTHSHAKER") " MISSILE"
+
+#if DXX_MAX_BUTTONS_PER_JOYSTICK || DXX_MAX_HATS_PER_JOYSTICK
+#define DXX_KCONFIG_ITEM_JOY_WIDTH(I)	I
+#else
+#define DXX_KCONFIG_ITEM_JOY_WIDTH(I)	(static_cast<void>(I), 0)
+#endif
+
+#include "kconfig.ui-table.cpp"
+
+/* Validate that every `kc_item` in every kc_* array satisfies the `requires`
+ * expression.
+ */
+static_assert(
+	/* Define, and immediately call, a lambda that takes a variable number of
+	 * references to objects of any type.  All such references will be of type
+	 * `kc_item (&)[N]` for varying `N`.
+	 */
+	(([]<auto &... kc_item_arrays_pack>() {
+		/* Define a lambda that takes a reference to one object and a deduced
+		 * pack of indexes into that object.  The reference will be of type
+		 * `kc_item (&)[sizeof...(Is)]`.  Call that lambda from a fold
+		 * expression that applies the lambda once to each of the objects from
+		 * `kc_item_arrays_pack`.
+		 */
+		const auto check_one_array{[]<auto &kc_item_array, std::size_t... Is>(std::index_sequence<Is...>) {
+			/* Use a fold expression to check each element of `kc_item_array`.
+			 * In practice, if the static_assert fails, both gcc and clang
+			 * include in the error output the specific array index that
+			 * failed.
+			 */
+			/* If `item.state_bit == STATE_NONE`, then this is a
+			 * count-based `kc_item`, and the pointer is optional.
+			 * `input_button_matched` can safely be called on count-based
+			 * `kc_item` records with `ci_state_ptr == nullptr`.
+			 *
+			 * Otherwise, this is a state-based `kc_item`, and
+			 * `input_button_matched` will write through
+			 * `item.ci_state_ptr` without checking.  Such items must have
+			 * a non-nullptr value in `item.ci_state_ptr`.
+			 */
+			static_assert(((kc_item_array[Is].state_bit == STATE_NONE || kc_item_array[Is].ci_state_ptr != nullptr) && ...));
+		}};
+		return (check_one_array.template operator()<kc_item_arrays_pack>(std::make_index_sequence<std::extent_v<std::remove_reference_t<decltype(kc_item_arrays_pack)>>>()), ..., true);
+		/* Pass to the outermost lambda references to all defined kc_* arrays. */
+		}).template operator()<kc_keyboard,
+#if DXX_MAX_JOYSTICKS
+		kc_joystick,
+#endif
+		kc_mouse, kc_rebirth>())
+);
+
+static enumerated_array<kc_mitem, std::size(kc_keyboard), dxx_kconfig_ui_kc_keyboard> kcm_keyboard;
+#if DXX_MAX_JOYSTICKS
+static enumerated_array<kc_mitem, std::size(kc_joystick), dxx_kconfig_ui_kc_joystick> kcm_joystick;
+#endif
+static enumerated_array<kc_mitem, std::size(kc_mouse), dxx_kconfig_ui_kc_mouse> kcm_mouse;
+static std::array<kc_mitem, std::size(kc_rebirth)> kcm_rebirth;
+
+static void kconfig_start_changing(kc_menu &menu)
+{
+	const auto citem{menu.citem};
+	if (menu.items[citem].type == kc_type::invert)
+	{
+		menu.changing = 0;		// in case we were changing something else
+		auto &value = menu.mitems[citem].value;
+		value = value ? 0 : 1;
+		return;
+	}
+	menu.q_fade_i = 0;	// start question mark flasher
+	menu.changing = 1;
+}
+
+static void kc_set_exclusive_binding(kc_menu &menu, kc_mitem &mitem, const kc_type type, const unsigned value)
+{
+	const auto nitems{menu.nitems};
+	for (auto &&[iterate_mitem, iterate_item] : zip(unchecked_partial_range(menu.mitems, nitems), unchecked_partial_range(menu.items, nitems)))
+	{
+		if (&iterate_mitem != &mitem && iterate_mitem.value == value && iterate_item.type == type)
+			iterate_mitem.value = 255;
+	}
+	mitem.value = value;
+	menu.changing = 0;
+}
+
+}
+}
+
+namespace {
+static void kc_drawinput(grs_canvas &, const grs_font &, const kc_item &item, kc_mitem &mitem, int is_current, const char *label);
+static void kc_change_key( kc_menu &menu,const d_event &event, kc_mitem& mitem );
+#if DXX_MAX_BUTTONS_PER_JOYSTICK || DXX_MAX_HATS_PER_JOYSTICK
+static void kc_change_joybutton( kc_menu &menu,const d_event &event, kc_mitem& mitem );
+#endif
+static void kc_change_mousebutton( kc_menu &menu,const d_event &event, kc_mitem& mitem );
+#if DXX_MAX_AXES_PER_JOYSTICK
+static void kc_change_joyaxis( kc_menu &menu,const d_event &event, kc_mitem& mitem );
+#endif
+static void kc_change_mouseaxis( kc_menu &menu,const d_event &event, kc_mitem& mitem );
+
+static const char *get_item_text(const kc_item &item, const kc_mitem &mitem, char (&buf)[10])
+{
+	if (mitem.value==255) {
+		return "";
+	} else {
+		switch( item.type )	{
+			case kc_type::key:
+				return key_properties[mitem.value].key_text;
+			case kc_type::mouse_button:
+				if (mitem.value >= std::size(mousebutton_text)) [[unlikely]]
+					return nullptr;
+				return mousebutton_text[mitem.value];
+			case kc_type::mouse_axis:
+				if (mitem.value >= std::size(mouseaxis_text)) [[unlikely]]
+					return nullptr;
+				return mouseaxis_text[mitem.value];
+#if DXX_MAX_BUTTONS_PER_JOYSTICK || DXX_MAX_HATS_PER_JOYSTICK
+			case kc_type::joy_button:
+#if SDL_MAJOR_VERSION == 2
+				if (num_controllers)
+				{
+					if (mitem.value < gcbutton_text.size()) [[likely]]
+						return &gcbutton_text[mitem.value][0];
+				}
+				else
+#endif
+				{
+					if (mitem.value < joybutton_text.size()) [[likely]]
+						return &joybutton_text[mitem.value][0];
+				}
+				/* If the value is out of range, show a generic label instead
+				 * of indexing outside the container.
+				 */
+				snprintf(buf, sizeof(buf), "BTN%2d", mitem.value + 1);
+				return buf;
+#else
+				(void)buf;
+#endif
+#if DXX_MAX_AXES_PER_JOYSTICK
+			case kc_type::joy_axis:
+#if SDL_MAJOR_VERSION == 2
+				if (num_controllers)
+				{
+					if (mitem.value < gamecontroller_axis_text.size()) [[likely]]
+						return &gamecontroller_axis_text[mitem.value][0];
+				}
+				else
+#endif
+				{
+					if (mitem.value < joyaxis_text.size()) [[likely]]
+						return &joyaxis_text[mitem.value][0];
+				}
+				snprintf(buf, sizeof(buf), "AXIS%2d", mitem.value + 1);
+				return buf;
+#else
+				(void)buf;
+#endif
+			case kc_type::invert:
+				if (mitem.value >= invert_text.size()) [[unlikely]]
+					return nullptr;
+				return invert_text[mitem.value];
+			default:
+				return NULL;
+		}
+	}
+}
+
+static int get_item_height(const grs_font &cv_font, const kc_item &item, const kc_mitem &mitem)
+{
+	char buf[10];
+	const char *btext;
+
+	btext = get_item_text(item, mitem, buf);
+	if (!btext)
+		return 0;
+	const auto h = gr_get_string_size(cv_font, btext).height;
+	return h;
+}
+
+static void kc_gr_2y_string(grs_canvas &canvas, const grs_font &cv_font, const char *const s, const font_y_scaled_float y, const font_x_scaled_float x0, const font_x_scaled_float x1)
+{
+	const auto &&[w, h] = gr_get_string_size(cv_font, s);
+	gr_string(canvas, cv_font, x0, y, s, w, h);
+	gr_string(canvas, cv_font, x1, y, s, w, h);
+}
+
+static void kconfig_draw(kc_menu &menu)
+{
+	grs_canvas &save_canvas = *grd_curcanv;
+	const auto &&fspacx = FSPACX();
+	const auto &&fspacy = FSPACY();
+	int w = menu.w_canv.cv_bitmap.bm_w, h = menu.w_canv.cv_bitmap.bm_h;
+
+	gr_set_default_canvas();
+	nm_draw_background(*grd_curcanv, ((SWIDTH - w) / 2) - BORDERX, ((SHEIGHT - h) / 2) - BORDERY, ((SWIDTH - w) / 2) + w + BORDERX, ((SHEIGHT - h) / 2) + h + BORDERY);
+
+	gr_set_current_canvas(menu.w_canv);
+	auto &canvas = *grd_curcanv;
+
+	const grs_font *save_font = canvas.cv_font;
+
+	auto &medium3_font = *MEDIUM3_FONT;
+	gr_string(canvas, medium3_font, 0x8000, fspacy(8), menu.title);
+
+	auto &game_font = *GAME_FONT;
+	gr_set_fontcolor(canvas, BM_XRGB(28, 28, 28), -1);
+	gr_string(canvas, game_font, 0x8000, fspacy(21),
+#if DXX_MAX_JOYSTICKS
+#if SDL_MAJOR_VERSION == 2
+		num_controllers
+		? "Enter/A changes, ctrl-d/R3 deletes, ctrl-r/Start(hold) resets, ESC/B exits"
+		:
+#endif
+#endif
+		"Enter changes, ctrl-d deletes, ctrl-r resets defaults, ESC exits"
+	);
+
+	if (menu.items == kc_keyboard)
+	{
+		gr_set_fontcolor(canvas, BM_XRGB(31, 27, 6), -1);
+		const uint8_t color = BM_XRGB(31,27,6);
+		const auto &&fspacx98 = fspacx(98);
+		const auto &&fspacx128 = fspacx(128);
+		const auto &&fspacy42 = fspacy(42);
+		gr_rect(canvas, fspacx98, fspacy42, fspacx(106), fspacy42, color); // horiz/left
+		gr_rect(canvas, fspacx(120), fspacy42, fspacx128, fspacy42, color); // horiz/right
+		const auto &&fspacy44 = fspacy(44);
+		gr_rect(canvas, fspacx98, fspacy42, fspacx98, fspacy44, color); // vert/left
+		gr_rect(canvas, fspacx128, fspacy42, fspacx128, fspacy44, color); // vert/right
+
+		const auto &&fspacx253 = fspacx(253);
+		const auto &&fspacx283 = fspacx(283);
+		gr_rect(canvas, fspacx253, fspacy42, fspacx(261), fspacy42, color); // horiz/left
+		gr_rect(canvas, fspacx(275), fspacy42, fspacx283, fspacy42, color); // horiz/right
+		gr_rect(canvas, fspacx253, fspacy42, fspacx253, fspacy44, color); // vert/left
+		gr_rect(canvas, fspacx283, fspacy42, fspacx283, fspacy44, color); // vert/right
+
+		kc_gr_2y_string(canvas, game_font, "OR", fspacy(40), fspacx(109), fspacx(264));
+	}
+#if DXX_MAX_JOYSTICKS
+	else if (menu.items == kc_joystick)
+	{
+		const uint8_t color = BM_XRGB(31, 27, 6);
+		gr_set_fontcolor(canvas, color, -1);
+#if DXX_MAX_AXES_PER_JOYSTICK
+		constexpr auto kconfig_axis_labels_top_y = DXX_KCONFIG_UI_JOYSTICK_AXES_TOP_Y + 8;
+		const auto &&fspacy_lower_label2 = fspacy(kconfig_axis_labels_top_y);
+		gr_string(canvas, game_font, 0x8000, fspacy(DXX_KCONFIG_UI_JOYSTICK_AXES_TOP_Y), TXT_AXES);
+		gr_set_fontcolor(canvas, BM_XRGB(28, 28, 28), -1);
+		kc_gr_2y_string(canvas, game_font, TXT_AXIS, fspacy_lower_label2, fspacx(81), fspacx(230));
+		kc_gr_2y_string(canvas, game_font, TXT_INVERT, fspacy_lower_label2, fspacx(111), fspacx(260));
+		gr_set_fontcolor(canvas, color, -1);
+#endif
+
+#if DXX_MAX_BUTTONS_PER_JOYSTICK || DXX_MAX_HATS_PER_JOYSTICK
+		constexpr auto kconfig_buttons_top_y = DXX_KCONFIG_UI_JOYSTICK_TOP_Y + 6;
+		constexpr auto kconfig_buttons_labels_top_y = kconfig_buttons_top_y + 4;
+		gr_string(canvas, game_font, 0x8000, fspacy(DXX_KCONFIG_UI_JOYSTICK_TOP_Y), TXT_BUTTONS);
+		const auto &&fspacx115 = fspacx(115);
+		const auto &&fspacy_horiz_OR_line = fspacy(kconfig_buttons_labels_top_y);
+		gr_rect(canvas, fspacx115, fspacy_horiz_OR_line, fspacx(123), fspacy_horiz_OR_line, color); // horiz/left
+		const auto &&fspacx145 = fspacx(145);
+		gr_rect(canvas, fspacx(137), fspacy_horiz_OR_line, fspacx145, fspacy_horiz_OR_line, color); // horiz/right
+		const auto &&fspacx261 = fspacx(261);
+		gr_rect(canvas, fspacx261, fspacy_horiz_OR_line, fspacx(269), fspacy_horiz_OR_line, color); // horiz/left
+		const auto &&fspacx291 = fspacx(291);
+		gr_rect(canvas, fspacx(283), fspacy_horiz_OR_line, fspacx291, fspacy_horiz_OR_line, color); // horiz/right
+
+		const auto &&fspacy_vert_OR_line = fspacy(kconfig_buttons_labels_top_y + 2);
+		gr_rect(canvas, fspacx115, fspacy_horiz_OR_line, fspacx115, fspacy_vert_OR_line, color); // vert/left
+		gr_rect(canvas, fspacx145, fspacy_horiz_OR_line, fspacx145, fspacy_vert_OR_line, color); // vert/right
+		gr_rect(canvas, fspacx261, fspacy_horiz_OR_line, fspacx261, fspacy_vert_OR_line, color); // vert/left
+		gr_rect(canvas, fspacx291, fspacy_horiz_OR_line, fspacx291, fspacy_vert_OR_line, color); // vert/right
+
+		kc_gr_2y_string(canvas, game_font, "OR", fspacy(kconfig_buttons_top_y + 2), fspacx(126), fspacx(272));
+#endif
+	}
+#endif
+	else if (menu.items == kc_mouse)
+	{
+		gr_set_fontcolor(canvas, BM_XRGB(31, 27, 6), -1);
+		gr_string(canvas, game_font, 0x8000, fspacy(37), TXT_BUTTONS);
+		gr_string(canvas, game_font, 0x8000, fspacy(137), TXT_AXES);
+		gr_set_fontcolor(canvas, BM_XRGB(28, 28, 28), -1);
+		const auto &&fspacy145 = fspacy(145);
+		kc_gr_2y_string(canvas, game_font, TXT_AXIS, fspacy145, fspacx( 87), fspacx(242));
+		kc_gr_2y_string(canvas, game_font, TXT_INVERT, fspacy145, fspacx(120), fspacx(274));
+	}
+	else if (menu.items == kc_rebirth)
+	{
+		gr_set_fontcolor(canvas, BM_XRGB(31, 27, 6), -1);
+
+		const auto &&fspacy60 = fspacy(60);
+		gr_string(canvas, game_font, fspacx(152), fspacy60, "KEYBOARD");
+#if DXX_MAX_BUTTONS_PER_JOYSTICK || DXX_MAX_HATS_PER_JOYSTICK
+		gr_string(canvas, game_font, fspacx(210), fspacy60, "JOYSTICK");
+#endif
+		gr_string(canvas, game_font, fspacx(273), fspacy60, "MOUSE");
+	}
+	
+	unsigned citem = menu.citem;
+	const char *current_label = NULL;
+	const char *litem = menu.litems;
+	const auto nitems{menu.nitems};
+	for (const auto i : xrange(nitems))
+	{
+		auto next_label = (i + 1 >= menu.nitems || menu.items[i + 1].y != menu.items[i].y) ? litem : nullptr;
+		if (i == citem)
+			current_label = litem;
+		else if (menu.items[i].w2)
+			kc_drawinput(canvas, game_font, menu.items[i], menu.mitems[i], 0, next_label);
+		if (next_label)
+			litem += strlen(litem) + 1;
+	}
+	kc_drawinput(canvas, game_font, menu.items[citem], menu.mitems[citem], 1, current_label);
+	
+	gr_set_fontcolor(canvas, BM_XRGB(28, 28, 28), -1);
+	if (menu.changing)
+	{
+		const char *s;
+		switch(menu.items[menu.citem].type)
+		{
+			case kc_type::key:
+				s = TXT_PRESS_NEW_KEY;
+				break;
+			case kc_type::mouse_button:
+				s = TXT_PRESS_NEW_MBUTTON;
+				break;
+			case kc_type::mouse_axis:
+				s = TXT_MOVE_NEW_MSE_AXIS;
+				break;
+#if DXX_MAX_BUTTONS_PER_JOYSTICK || DXX_MAX_HATS_PER_JOYSTICK
+			case kc_type::joy_button:
+				s = TXT_PRESS_NEW_JBUTTON;
+				break;
+#endif
+#if DXX_MAX_AXES_PER_JOYSTICK
+			case kc_type::joy_axis:
+				s = TXT_MOVE_NEW_JOY_AXIS;
+				break;
+#endif
+			default:
+				s = nullptr;
+				break;
+		}
+		if (s)
+			gr_string(canvas, game_font, 0x8000, fspacy(INFO_Y), s);
+		auto &item = menu.items[menu.citem];
+		auto &menu_fade_index = menu.q_fade_i;
+		const auto fade_element = fades[menu_fade_index];
+#if DXX_BUILD_DESCENT == 1
+		const auto color = gr_fade_table[static_cast<gr_fade_level>(fade_element)][BM_XRGB(21, 0, 24)];
+#elif DXX_BUILD_DESCENT == 2
+		const auto color = BM_XRGB(21 * fade_element / 31, 0, 24 * fade_element / 31);
+#endif
+		kc_drawquestion(canvas, game_font, menu_fade_index, item.xinput, item.y, item.w2, color);
+	}
+	canvas.cv_font = save_font;
+	gr_set_current_canvas( save_canvas );
+}
+
+static inline int in_bounds(unsigned mx, unsigned my, unsigned x1, unsigned xw, unsigned y1, unsigned yh)
+{
+	if (mx <= x1)
+		return 0;
+	if (my <= y1)
+		return 0;
+	if (mx >= x1 + xw)
+		return 0;
+	if (my >= y1 + yh)
+		return 0;
+	return 1;
+}
+
+}
+
+namespace dsx {
+namespace {
+
+static window_event_result kconfig_mouse(kc_menu &menu, const d_event &event)
+{
+	grs_canvas &save_canvas = *grd_curcanv;
+	int x1, y1;
+	window_event_result rval = window_event_result::ignored;
+
+	gr_set_current_canvas(menu.w_canv);
+	auto &canvas = *grd_curcanv;
+	
+	if (menu.mouse_state)
+	{
+		int item_height;
+		
+		const auto [mx, my, mz] = mouse_get_pos();
+		const auto &&fspacx = FSPACX();
+		const auto &&fspacy = FSPACY();
+		const auto nitems{menu.nitems};
+		for (const auto i : xrange(nitems))
+		{
+			item_height = get_item_height(*canvas.cv_font, menu.items[i], menu.mitems[i]);
+			x1 = canvas.cv_bitmap.bm_x + fspacx(menu.items[i].xinput);
+			y1 = canvas.cv_bitmap.bm_y + fspacy(menu.items[i].y);
+			if (in_bounds(mx, my, x1, fspacx(menu.items[i].w2), y1, item_height)) {
+				menu.citem = i;
+				rval = window_event_result::handled;
+				break;
+			}
+		}
+	}
+	else if (event.type == event_type::mouse_button_up)
+	{
+		int item_height;
+		const auto [mx, my, mz] = mouse_get_pos();
+		item_height = get_item_height(*canvas.cv_font, menu.items[menu.citem], menu.mitems[menu.citem]);
+		const auto &&fspacx = FSPACX();
+		x1 = canvas.cv_bitmap.bm_x + fspacx(menu.items[menu.citem].xinput);
+		y1 = canvas.cv_bitmap.bm_y + FSPACY(menu.items[menu.citem].y);
+		if (in_bounds(mx, my, x1, fspacx(menu.items[menu.citem].w2), y1, item_height)) {
+			kconfig_start_changing(menu);
+			rval = window_event_result::handled;
+		}
+		else
+		{
+			// Click out of changing mode - kreatordxx
+			menu.changing = 0;
+			rval = window_event_result::handled;
+		}
+	}
+	
+	gr_set_current_canvas(save_canvas);
+	
+	return rval;
+}
+
+}
+}
+
+namespace dcx {
+namespace {
+
+template <std::size_t M, std::size_t C>
+static void reset_mitem_values(std::array<kc_mitem, M> &m, const std::array<uint8_t, C> &c)
+{
+	for (std::size_t i = 0; i != min(M, C); ++i)
+		m[i].value = c[i];
+}
+
+static void step_citem_past_empty_cell(unsigned &citem, const kc_item *const items, const uint8_t kc_item::*const next)
+{
+	do {
+		citem = items[citem].*next;
+	} while (!items[citem].w2);
+}
+
+static void kc_reset_to_defaults(kc_menu &menu)
+{
+	if (menu.items == kc_keyboard)
+		reset_mitem_values(kcm_keyboard, DefaultKeySettings.Keyboard);
+#if DXX_MAX_JOYSTICKS
+	else if (menu.items == kc_joystick)
+	{
+#if SDL_MAJOR_VERSION == 2
+		if (num_controllers)
+		{
+			reset_mitem_values(kcm_joystick, DefaultKeySettingsGameController);
+			return;
+		}
+#endif
+		reset_mitem_values(kcm_joystick, DefaultKeySettings.Joystick);
+	}
+#endif
+	else if (menu.items == kc_mouse)
+		reset_mitem_values(kcm_mouse, DefaultKeySettings.Mouse);
+	else if (menu.items == kc_rebirth)
+		reset_mitem_values(kcm_rebirth, DefaultKeySettingsRebirth);
+}
+
+static window_event_result kconfig_key_command(kc_menu &menu, const d_event &event)
+{
+	auto k = event_key_get(event);
+
+	// when changing, process no keys instead of ESC
+	if (menu.changing && (k != -2 && k != KEY_ESC))
+		return window_event_result::ignored;
+	switch (k)
+	{
+		case KEY_CTRLED+KEY_D:
+			menu.mitems[menu.citem].value = 255;
+			return window_event_result::handled;
+		case KEY_CTRLED+KEY_R:
+			kc_reset_to_defaults(menu);
+			return window_event_result::handled;
+		case KEY_DELETE:
+			menu.mitems[menu.citem].value = 255;
+			return window_event_result::handled;
+		case KEY_UP: 		
+		case KEY_PAD8:
+			step_citem_past_empty_cell(menu.citem, menu.items, &kc_item::u);
+			return window_event_result::handled;
+		case KEY_DOWN:
+		case KEY_PAD2:
+			step_citem_past_empty_cell(menu.citem, menu.items, &kc_item::d);
+			return window_event_result::handled;
+		case KEY_LEFT:
+		case KEY_PAD4:
+			step_citem_past_empty_cell(menu.citem, menu.items, &kc_item::l);
+			return window_event_result::handled;
+		case KEY_RIGHT:
+		case KEY_PAD6:
+			step_citem_past_empty_cell(menu.citem, menu.items, &kc_item::r);
+			return window_event_result::handled;
+		case KEY_ENTER:
+		case KEY_PADENTER:
+			kconfig_start_changing(menu);
+			return window_event_result::handled;
+		case KEY_ESC:
+			if (menu.changing)
+				menu.changing = 0;
+			else
+			{
+				return window_event_result::close;
+			}
+			return window_event_result::handled;
+		case 0:		// some other event
+			break;
+			
+		default:
+			break;
+	}
+	return window_event_result::ignored;
+}
+
+}
+}
+
+namespace dsx {
+namespace {
+
+window_event_result kc_menu::event_handler(const d_event &event)
+{
+#if DXX_MAX_BUTTONS_PER_JOYSTICK
+	// In the kconfig menu, intercept Start (long-press reset) and R3 (delete binding)
+	// before joy_translate_menu_key would consume them via gc_key_map.
+#if SDL_MAJOR_VERSION == 2
+	const bool skip_translate = !changing &&
+		(event.type == event_type::joystick_button_down || event.type == event_type::joystick_button_up) &&
+		(event_joystick_get_button(event) == SDL_CONTROLLER_BUTTON_START ||
+		 event_joystick_get_button(event) == SDL_CONTROLLER_BUTTON_RIGHTSTICK);
+	if (!skip_translate)
+#endif
+	if (!changing && joy_translate_menu_key(event))
+		return window_event_result::handled;
+#endif
+
+	switch (event.type)
+	{
+		case event_type::window_activated:
+			game_flush_inputs(Controls);
+			break;
+		case event_type::window_deactivated:
+			mouse_state = 0;
+			break;
+		case event_type::mouse_button_down:
+		case event_type::mouse_button_up:
+			if (changing && items[citem].type == kc_type::mouse_button && event.type == event_type::mouse_button_up)
+			{
+				kc_change_mousebutton(*this, event, mitems[citem]);
+				mouse_state = (event.type == event_type::mouse_button_down);
+				return window_event_result::handled;
+			}
+
+			if (event_mouse_get_button(event) == mbtn::right)
+			{
+				if (!changing)
+				{
+					return window_event_result::close;
+				}
+				return window_event_result::handled;
+			}
+			else if (event_mouse_get_button(event) != mbtn::left)
+				return window_event_result::ignored;
+
+			mouse_state = (event.type == event_type::mouse_button_down);
+			return kconfig_mouse(*this, event);
+
+		case event_type::mouse_moved:
+			if (changing && items[citem].type == kc_type::mouse_axis)
+				kc_change_mouseaxis(*this, event, mitems[citem]);
+			else
+				old_maxis = event_mouse_get_delta(event);
+			break;
+
+#if DXX_MAX_BUTTONS_PER_JOYSTICK || DXX_MAX_HATS_PER_JOYSTICK
+		case event_type::joystick_button_down:
+			if (changing && items[citem].type == kc_type::joy_button)
+				kc_change_joybutton(*this, event, mitems[citem]);
+#if SDL_MAJOR_VERSION == 2
+			else if (!changing)
+			{
+				const auto button = event_joystick_get_button(event);
+				if (button == SDL_CONTROLLER_BUTTON_RIGHTSTICK)
+				{
+					mitems[citem].value = 255;
+					return window_event_result::handled;
+				}
+				if (button == SDL_CONTROLLER_BUTTON_START)
+				{
+					start_press_time = timer_query();
+					return window_event_result::handled;
+				}
+			}
+#endif
+			break;
+#if SDL_MAJOR_VERSION == 2
+		case event_type::joystick_button_up:
+			if (!changing && event_joystick_get_button(event) == SDL_CONTROLLER_BUTTON_START && start_press_time)
+			{
+				const auto held = timer_query() - start_press_time;
+				start_press_time = 0;
+				if (held >= F1_0)	// 1 second long-press
+				{
+					if (nm_messagebox_str(menu_title{nullptr}, nm_messagebox_tie(TXT_YES, TXT_NO), menu_subtitle{"Reset all bindings to defaults?"}) == 0)
+						kc_reset_to_defaults(*this);
+				}
+				return window_event_result::handled;
+			}
+			break;
+#endif
+#endif
+
+#if DXX_MAX_AXES_PER_JOYSTICK
+		case event_type::joystick_moved:
+			if (changing && items[citem].type == kc_type::joy_axis)
+				kc_change_joyaxis(*this, event, mitems[citem]);
+			else
+			{
+				const auto &av = event_joystick_get_axis(event);
+				const auto &axis = av.axis;
+				const auto &value = av.value;
+				old_jaxis[axis] = value;
+			}
+			break;
+#endif
+
+		case event_type::key_command:
+		{
+			window_event_result rval = kconfig_key_command(*this, event);
+			if (rval != window_event_result::ignored)
+				return rval;
+			if (changing && items[citem].type == kc_type::key)
+				kc_change_key(*this, event, mitems[citem]);
+			return window_event_result::ignored;
+		}
+
+		case event_type::idle:
+			kconfig_mouse(*this, event);
+			break;
+		case event_type::window_draw:
+			if (changing)
+				timer_delay(f0_1/10);
+			else
+				timer_delay2(50);
+			kconfig_draw(*this);
+			break;
+		case event_type::window_close:
+			// Update save values...
+			for (auto &&[kcm, setting] : zip(kcm_keyboard, PlayerCfg.KeySettings.Keyboard))
+				setting = kcm.value;
+#if DXX_MAX_JOYSTICKS
+			for (auto &&[kcm, setting] : zip(kcm_joystick, PlayerCfg.KeySettings.Joystick))
+				setting = kcm.value;
+#endif
+
+			for (auto &&[kcm, setting] : zip(kcm_mouse, PlayerCfg.KeySettings.Mouse))
+				setting = kcm.value;
+			for (auto &&[kcm, setting] : zip(kcm_rebirth, PlayerCfg.KeySettingsRebirth))
+				setting = kcm.value;
+			return window_event_result::ignored;	// continue closing
+		default:
+			return window_event_result::ignored;
+	}
+	return window_event_result::handled;
+}
+
+static void kconfig_sub(const char *litems, const kc_item * items,kc_mitem *mitems,int nitems, const char *title)
+{
+	set_screen_mode(SCREEN_MENU);
+	kc_set_controls();
+
+	const auto &&fspacx = FSPACX();
+	const auto &&fspacy = FSPACY();
+	const uint16_t target_window_width = fspacx(320);
+	const uint16_t target_window_height = fspacy(220);
+	const auto swidth{SWIDTH};
+	const auto sheight{SHEIGHT};
+	const auto window_width = std::min(swidth, target_window_width);
+	const auto window_height = std::min(sheight, target_window_height);
+	auto menu = window_create<kc_menu>(grd_curscreen->sc_canvas, (swidth - window_width) / 2, (sheight - window_height) / 2, window_width, window_height);
+	menu->items = items;
+	menu->litems = litems;
+	menu->mitems = mitems;
+	menu->nitems = nitems;
+	menu->title = title;
+	if (!items[0].w2)
+		step_citem_past_empty_cell(menu->citem, items, &kc_item::r);
+}
+
+template <std::size_t N>
+static void kconfig_sub(const char *litems, const kc_item (&items)[N], std::array<kc_mitem, N> &mitems, const char *title)
+{
+	kconfig_sub(litems, items, mitems.data(), N, title);
+}
+
+}
+}
+
+namespace {
+
+static void kc_drawinput(grs_canvas &canvas, const grs_font &cv_font, const kc_item &item, kc_mitem &mitem, const int is_current, const char *const label)
+{
+	char buf[10];
+	const char *btext;
+	const auto &&fspacx = FSPACX();
+	const auto &&fspacy = FSPACY();
+	unsigned r, g, b;
+	if (label)
+	{
+		if (is_current)
+			r = 20 * 2, g = 20 * 2, b = 29 * 2;
+		else
+			r = 15 * 2, g = 15 * 2, b = 24 * 2;
+		gr_set_fontcolor(canvas, gr_find_closest_color(r, g, b), -1);
+		gr_string(canvas, cv_font, fspacx(item.x), fspacy(item.y), label);
+	}
+
+	btext = get_item_text(item, mitem, buf);
+	if (!btext)
+		return;
+	{
+		if (is_current)
+			r = 21 * 2, g = 0, b = 24 * 2;
+		else
+			r = 16 * 2, g = 0, b = 19 * 2;
+
+		int x;
+		const auto color = gr_find_closest_color(r, g, b);
+		const auto &&[w, h] = gr_get_string_size(cv_font, btext);
+		const auto &&fspacx_item_xinput = fspacx(item.xinput);
+		const auto &&fspacy_item_y = fspacy(item.y);
+		gr_urect(canvas, fspacx_item_xinput, fspacy(item.y - 1), fspacx(item.xinput + item.w2), fspacy_item_y + h, color);
+		
+		if (mitem.oldvalue == mitem.value)
+			r = b = 28 * 2;
+		else
+			r = b = 0;
+		gr_set_fontcolor(canvas, gr_find_closest_color(r, 28 * 2, b), -1);
+
+		x = fspacx_item_xinput + ((fspacx(item.w2) - w) / 2);
+	
+		gr_string(canvas, cv_font, x, fspacy_item_y, btext, w, h);
+	}
+}
+
+static void kc_change_key( kc_menu &menu,const d_event &event, kc_mitem &mitem )
+{
+	ubyte keycode{255};
+
+	assert(event.type == event_type::key_command);
+	keycode = event_key_get_raw(event);
+
+	auto e = end(system_keys);
+	if (unlikely(CGameArg.CtlNoStickyKeys))
+		e = std::prev(e, 3);
+	const auto predicate = [keycode](uint8_t k) { return keycode == k; };
+	if (std::any_of(begin(system_keys), e, predicate))
+		return;
+
+	kc_set_exclusive_binding(menu, mitem, kc_type::key, keycode);
+}
+
+#if DXX_MAX_BUTTONS_PER_JOYSTICK
+static void kc_change_joybutton( kc_menu &menu,const d_event &event, kc_mitem &mitem )
+{
+	int button{255};
+
+	assert(event.type == event_type::joystick_button_down);
+	button = event_joystick_get_button(event);
+
+	kc_set_exclusive_binding(menu, mitem, kc_type::joy_button, button);
+}
+#endif
+
+static void kc_change_mousebutton( kc_menu &menu,const d_event &event, kc_mitem &mitem)
+{
+	const auto button = event_mouse_get_button(event);
+	kc_set_exclusive_binding(menu, mitem, kc_type::mouse_button, underlying_value(button));
+}
+
+#if DXX_MAX_AXES_PER_JOYSTICK
+static void kc_change_joyaxis( kc_menu &menu,const d_event &event, kc_mitem &mitem )
+{
+	const auto &av = event_joystick_get_axis(event);
+	const auto &axis = av.axis;
+	const auto &value = av.value;
+
+	if ( abs(value-menu.old_jaxis[axis])<32 )
+		return;
+	con_printf(CON_DEBUG, "Axis Movement detected: Axis %i", axis);
+
+	kc_set_exclusive_binding(menu, mitem, kc_type::joy_axis, axis);
+}
+#endif
+
+static void kc_change_mouseaxis( kc_menu &menu,const d_event &event, kc_mitem &mitem )
+{
+	assert(event.type == event_type::mouse_moved);
+	const auto [dx, dy, dz] = event_mouse_get_delta(event);
+	uint8_t code;
+	if (abs(dz) > 5)
+		code = 2;
+	else if (abs(dy) > 5)
+		code = 1;
+	else if (abs(dx) > 5)
+		code = 0;
+	else
+		return;
+	kc_set_exclusive_binding(menu, mitem, kc_type::mouse_axis, code);
+}
+
+}
+
+void kconfig(const kconfig_type n)
+{
+	switch (n)
+	{
+#define kconfig_case(TYPE,TITLE)	\
+		case kconfig_type::TYPE:	\
+			kconfig_sub(DXX_KCONFIG_UI_LABEL_kc_##TYPE, kc_##TYPE, kcm_##TYPE, TITLE);	\
+			break;
+		kconfig_case(keyboard, "KEYBOARD");
+#if DXX_MAX_JOYSTICKS
+		kconfig_case(joystick, "JOYSTICK");
+#endif
+		kconfig_case(mouse, "MOUSE");
+		kconfig_case(rebirth, "WEAPON KEYS");
+#undef kconfig_case
+		default:
+			Int3();
+			return;
+	}
+}
+
+namespace dsx {
+namespace {
+
+static void input_button_matched(control_info &Controls, const kc_item& item, int down)
+{
+	if (item.state_bit)
+	{
+		if (down)
+			Controls.state.*item.ci_state_ptr |= item.state_bit;
+		else
+			Controls.state.*item.ci_state_ptr &= ~item.state_bit;
+	}
+	else
+	{
+		if (item.ci_count_ptr != NULL && down)
+			Controls.state.*item.ci_count_ptr += 1;
+	}
+}
+
+}
+}
+
+namespace dcx {
+namespace {
+
+template <template<typename> class F>
+static void adjust_ramped_keyboard_field(float& keydown_time, ubyte& state, fix& time, const float& sensitivity, const int& speed_factor, const int& speed_divisor = 1)
+#define adjust_ramped_keyboard_field(F, M, ...)	\
+	(adjust_ramped_keyboard_field<F>(Controls.down_time.M, Controls.state.M, __VA_ARGS__))
+{
+	if (state)
+	{
+                if (keydown_time < F1_0)
+			keydown_time += (static_cast<float>(FrameTime) * 6.66) * ((sensitivity + 1) / 17); // values based on observation that the original game uses a keyboard ramp of 8 frames. Full sensitivity should reflect 60FPS behaviour, half sensitivity reflects 30FPS behaviour (give or take a frame).
+                time = F<fix>()(time, speed_factor / speed_divisor * (keydown_time / F1_0));
+	}
+	else
+		keydown_time = 0;
+}
+
+template <std::size_t N>
+static void adjust_axis_field(fix& time, const std::array<fix, N> &axes, unsigned value, unsigned invert, const int& sensitivity)
+{
+	if (value == 255)
+		return;
+	fix amount = (axes.at(value) * sensitivity) / 8;
+	if ( !invert ) // If not inverted...
+		time -= amount;
+	else
+		time += amount;
+}
+
+static void clamp_value(fix& value, const fix& lower, const fix& upper)
+{
+	value = min(max(value, lower), upper);
+}
+
+static void clamp_symmetric_value(fix& value, const fix& bound)
+{
+	clamp_value(value, -bound, bound);
+}
+
+#if DXX_MAX_AXES_PER_JOYSTICK
+static void convert_raw_joy_axis(fix &result, const fix raw_joy_axis, const dxx_kconfig_ui_kc_joystick kcm_index, const player_config_joystick_index player_cfg_index, const uint_fast32_t i)
+{
+	if (i != kcm_joystick[kcm_index].value)
+		return;
+	const auto joy_axis = (abs(raw_joy_axis) <= (128 * PlayerCfg.JoystickLinear[player_cfg_index]) / 16)
+		? (raw_joy_axis * (FrameTime * PlayerCfg.JoystickSpeed[player_cfg_index]) / 16)
+		: (raw_joy_axis * FrameTime);
+	result = joy_axis / 128;
+}
+#endif
+
+static inline void adjust_button_time(fix &o, uint8_t add, uint8_t sub, fix v)
+{
+	if (add)
+	{
+		if (sub)
+			return;
+		o += v;
+	}
+	else if (sub)
+		o -= v;
+}
+
+static void clamp_kconfig_control_with_overrun(fix &value, const fix &bound, fix &excess, const fix &ebound)
+{
+	/* Assume no integer overflow here */
+	value += excess;
+	const auto ivalue{value};
+	clamp_symmetric_value(value, bound);
+	excess = ivalue - value;
+	clamp_symmetric_value(excess, ebound);
+}
+
+static unsigned allow_uncapped_turning()
+{
+	const auto game_mode{Game_mode};
+	if (!(game_mode & GM_MULTI))
+		return PlayerCfg.MouselookFlags & MouselookMode::Singleplayer;
+	return PlayerCfg.MouselookFlags &
+		Netgame.MouselookFlags &
+		(+(game_mode & GM_MULTI_COOP)
+		? MouselookMode::MPCoop
+		: MouselookMode::MPAnarchy);
+}
+
+static unsigned release_pitch_lock()
+{
+	const auto game_mode{Game_mode};
+	if(!(game_mode & GM_MULTI)) {
+		return PlayerCfg.PitchLockFlags & MouselookMode::Singleplayer;
+	}
+
+	return PlayerCfg.PitchLockFlags &
+		Netgame.PitchLockFlags &
+		(+(game_mode & GM_MULTI_COOP) ? MouselookMode::MPCoop : MouselookMode::MPAnarchy);
+}
+
+}
+}
+
+namespace dsx {
+
+void kconfig_read_controls(control_info &Controls, const d_event &event, int automap_flag)
+{
+	static fix64 mouse_delta_time = 0;
+
+#ifndef NDEBUG
+	// --- Don't do anything if in debug mode ---
+	if ( keyd_pressed[KEY_DELETE] )
+	{
+		Controls = {};
+		return;
+	}
+#endif
+
+	const auto frametime{FrameTime};
+
+	switch (event.type)
+	{
+		case event_type::key_command:
+		case event_type::key_release:
+			{
+				const auto &&key = event_key_get_raw(event);
+				if (key < 255)
+				{
+					for (auto &&[kc, kcm] : zip(kc_keyboard, kcm_keyboard))
+					{
+						if (kcm.value == key)
+							input_button_matched(Controls, kc, event.type == event_type::key_command);
+					}
+			if (!automap_flag && event.type == event_type::key_command)
+				for (uint_fast32_t i = 0, j = 0; i < 28; i += 3, j++)
+					if (kcm_rebirth[i].value == key)
+					{
+						Controls.state.select_weapon = j+1;
+						break;
+					}
+				}
+			}
+			break;
+#if DXX_MAX_BUTTONS_PER_JOYSTICK
+		case event_type::joystick_button_down:
+		case event_type::joystick_button_up:
+			if (!(PlayerCfg.ControlType & CONTROL_USING_JOYSTICK))
+				break;
+			{
+				const auto &&button = event_joystick_get_button(event);
+				if (button < 255)
+				{
+					for (auto &&[kc, kcm] : zip(kc_joystick, kcm_joystick))
+					{
+						if (kc.type == kc_type::joy_button && kcm.value == button)
+							input_button_matched(Controls, kc, event.type == event_type::joystick_button_down);
+					}
+			if (!automap_flag && event.type == event_type::joystick_button_down)
+				for (uint_fast32_t i = 1, j = 0; i < 29; i += 3, j++)
+					if (kcm_rebirth[i].value == button)
+					{
+						Controls.state.select_weapon = j+1;
+						break;
+					}
+				}
+			break;
+			}
+#endif
+		case event_type::mouse_button_down:
+		case event_type::mouse_button_up:
+			if (!(PlayerCfg.ControlType & CONTROL_USING_MOUSE))
+				break;
+			{
+				const auto mb = event_mouse_get_button(event);
+				const auto button = underlying_value(mb);
+					for (auto &&[kc, kcm] : zip(kc_mouse, kcm_mouse))
+					{
+						if (kc.type == kc_type::mouse_button && kcm.value == button)
+							input_button_matched(Controls, kc, event.type == event_type::mouse_button_down);
+					}
+			if (!automap_flag && event.type == event_type::mouse_button_down)
+				for (uint_fast32_t i = 2, j = 0; i < 30; i += 3, j++)
+					if (kcm_rebirth[i].value == button)
+					{
+						Controls.state.select_weapon = j+1;
+						break;
+					}
+			}
+			break;
+#if DXX_MAX_AXES_PER_JOYSTICK
+		case event_type::joystick_moved:
+		{
+			if (!(PlayerCfg.ControlType & CONTROL_USING_JOYSTICK))
+				break;
+			const auto &av = event_joystick_get_axis(event);
+			const auto &axis = av.axis;
+			auto value = av.value;
+			int joy_null_value{0};
+#ifdef dxx_kconfig_ui_kc_joystick_pitch_ud
+			if (axis == PlayerCfg.KeySettings.Joystick[dxx_kconfig_ui_kc_joystick_pitch_ud]) // Pitch U/D Deadzone
+				joy_null_value = PlayerCfg.JoystickDead[player_config_joystick_index::pitch_ud] * 8;
+			else
+#endif
+#ifdef dxx_kconfig_ui_kc_joystick_turn
+			if (axis == PlayerCfg.KeySettings.Joystick[dxx_kconfig_ui_kc_joystick_turn]) // Turn L/R Deadzone
+				joy_null_value = PlayerCfg.JoystickDead[player_config_joystick_index::turn_lr] * 8;
+			else
+#endif
+#ifdef dxx_kconfig_ui_kc_joystick_slide_lr
+			if (axis == PlayerCfg.KeySettings.Joystick[dxx_kconfig_ui_kc_joystick_slide_lr]) // Slide L/R Deadzone
+				joy_null_value = PlayerCfg.JoystickDead[player_config_joystick_index::slide_lr] * 8;
+			else
+#endif
+#ifdef dxx_kconfig_ui_kc_joystick_slide_ud
+			if (axis == PlayerCfg.KeySettings.Joystick[dxx_kconfig_ui_kc_joystick_slide_ud]) // Slide U/D Deadzone
+				joy_null_value = PlayerCfg.JoystickDead[player_config_joystick_index::slide_ud] * 8;
+			else
+#endif
+#ifdef dxx_kconfig_ui_kc_joystick_bank
+			if (axis == PlayerCfg.KeySettings.Joystick[dxx_kconfig_ui_kc_joystick_bank]) // Bank Deadzone
+				joy_null_value = PlayerCfg.JoystickDead[player_config_joystick_index::bank_lr] * 8;
+			else
+#endif
+#ifdef dxx_kconfig_ui_kc_joystick_throttle
+			if (axis == PlayerCfg.KeySettings.Joystick[dxx_kconfig_ui_kc_joystick_throttle]) // Throttle - default deadzone
+				joy_null_value = PlayerCfg.JoystickDead[player_config_joystick_index::throttle] * 3;
+			else
+#endif
+			{
+				/* To simplify the preprocessor chain above, define an empty
+				 * block for the last `else` to consume.
+				 */
+			}
+			Controls.raw_joy_axis[axis] = apply_deadzone({value}, {joy_null_value});
+			break;
+		}
+#endif
+		case event_type::mouse_moved:
+		{
+			if (!(PlayerCfg.ControlType & CONTROL_USING_MOUSE))
+				break;
+			if (PlayerCfg.MouseFlightSim)
+			{
+				const auto ax{event_mouse_get_delta(event)};
+				for (uint_fast32_t i = 0; i <= 2; i++)
+				{
+					int mouse_null_value = (i==2?16:PlayerCfg.MouseFSDead*8);
+					Controls.raw_mouse_axis[i] += ax[i];
+					clamp_symmetric_value(Controls.raw_mouse_axis[i], MOUSEFS_DELTA_RANGE);
+					if (Controls.raw_mouse_axis[i] > mouse_null_value) 
+						Controls.mouse_axis[i] = (((Controls.raw_mouse_axis[i] - mouse_null_value) * MOUSEFS_DELTA_RANGE) / (MOUSEFS_DELTA_RANGE - mouse_null_value) * frametime) / MOUSEFS_DELTA_RANGE;
+					else if (Controls.raw_mouse_axis[i] < -mouse_null_value)
+						Controls.mouse_axis[i] = (((Controls.raw_mouse_axis[i] + mouse_null_value) * MOUSEFS_DELTA_RANGE) / (MOUSEFS_DELTA_RANGE - mouse_null_value) * frametime) / MOUSEFS_DELTA_RANGE;
+					else
+						Controls.mouse_axis[i] = 0;
+				}
+			}
+			else
+			{
+				Controls.pending_mouse_delta.update(event_mouse_get_delta(event));
+				mouse_delta_time = timer_query() + DESIGNATED_GAME_FRAMETIME;
+			}
+			break;
+		}
+		case event_type::idle:
+		default:
+			if (!PlayerCfg.MouseFlightSim && mouse_delta_time < timer_query())
+			{
+				Controls.mouse_axis[0] = Controls.mouse_axis[1] = Controls.mouse_axis[2] = 0;
+				mouse_delta_time = timer_query() + DESIGNATED_GAME_FRAMETIME;
+			}
+			break;
+	}
+}
+
+void kconfig_end_loop(control_info &Controls, const fix frametime)
+{
+	static constexpr unsigned FREE_PITCH_FACTOR{1};
+	static constexpr unsigned LOCKED_PITCH_FACTOR{2};
+	if (const auto delta = Controls.pending_mouse_delta.consume())
+	{
+		for (auto &&[raw_mouse_axis, d] : zip(Controls.raw_mouse_axis, *delta))
+			raw_mouse_axis = static_cast<fix>(std::clamp(d,
+				static_cast<int64_t>(std::numeric_limits<fix>::min()),
+				static_cast<int64_t>(std::numeric_limits<fix>::max())));
+		Controls.mouse_axis[0] = (Controls.raw_mouse_axis[0] * frametime) / 8;
+		Controls.mouse_axis[1] = (Controls.raw_mouse_axis[1] * frametime) / 8;
+		Controls.mouse_axis[2] = (Controls.raw_mouse_axis[2] * frametime);
+	}
+#if DXX_MAX_AXES_PER_JOYSTICK
+	std::array<fix, JOY_MAX_AXES> joy_axis{};
+	for (auto &&[i, o, raw_joy_axis] : enumerate(zip(joy_axis, Controls.raw_joy_axis)))
+	{
+#ifdef dxx_kconfig_ui_kc_joystick_turn
+		convert_raw_joy_axis(o, raw_joy_axis, dxx_kconfig_ui_kc_joystick_turn, player_config_joystick_index::turn_lr, i); // Turn L/R
+#endif
+#ifdef dxx_kconfig_ui_kc_joystick_pitch_ud
+		convert_raw_joy_axis(o, raw_joy_axis, dxx_kconfig_ui_kc_joystick_pitch_ud, player_config_joystick_index::pitch_ud, i); // Pitch U/D
+#endif
+#ifdef dxx_kconfig_ui_kc_joystick_slide_lr
+		convert_raw_joy_axis(o, raw_joy_axis, dxx_kconfig_ui_kc_joystick_slide_lr, player_config_joystick_index::slide_lr, i); // Slide L/R
+#endif
+#ifdef dxx_kconfig_ui_kc_joystick_slide_ud
+		convert_raw_joy_axis(o, raw_joy_axis, dxx_kconfig_ui_kc_joystick_slide_ud, player_config_joystick_index::slide_ud, i); // Slide U/D
+#endif
+#ifdef dxx_kconfig_ui_kc_joystick_bank
+		convert_raw_joy_axis(o, raw_joy_axis, dxx_kconfig_ui_kc_joystick_bank, player_config_joystick_index::bank_lr, i); // Bank
+#endif
+#ifdef dxx_kconfig_ui_kc_joystick_throttle
+		convert_raw_joy_axis(o, raw_joy_axis, dxx_kconfig_ui_kc_joystick_throttle, player_config_joystick_index::throttle, i); // Throttle
+#endif
+	}
+#endif
+
+	const auto speed_factor = (cheats.turbo ? 2 : 1) * frametime;
+
+	//------------ Read pitch_time -----------
+	if ( !Controls.state.slide_on )
+	{
+		auto pitch_factor = LOCKED_PITCH_FACTOR;
+		if (release_pitch_lock())
+			pitch_factor = FREE_PITCH_FACTOR;
+
+		// From keyboard...		
+		adjust_ramped_keyboard_field(plus, key_pitch_forward, Controls.pitch_time, PlayerCfg.KeyboardSens[player_config_keyboard_index::pitch_ud], speed_factor, pitch_factor);
+		adjust_ramped_keyboard_field(minus, key_pitch_backward, Controls.pitch_time, PlayerCfg.KeyboardSens[player_config_keyboard_index::pitch_ud], speed_factor, pitch_factor);
+
+		// From joystick...
+#ifdef dxx_kconfig_ui_kc_joystick_pitch_ud
+		adjust_axis_field(Controls.pitch_time, joy_axis, kcm_joystick[dxx_kconfig_ui_kc_joystick_pitch_ud].value, kcm_joystick[dxx_kconfig_ui_kc_joystick_invert_pitch].value, PlayerCfg.JoystickSens[player_config_joystick_index::pitch_ud]);
+#endif
+		// From mouse...
+#ifdef dxx_kconfig_ui_kc_mouse_pitch_ud
+		adjust_axis_field(Controls.pitch_time, Controls.mouse_axis, kcm_mouse[dxx_kconfig_ui_kc_mouse_pitch_ud].value, kcm_mouse[dxx_kconfig_ui_kc_mouse_invert_pitch].value, PlayerCfg.MouseSens[player_config_mouse_index::pitch_ud]);
+#endif
+	}
+	else Controls.pitch_time = 0;
+
+
+	//----------- Read vertical_thrust_time -----------------
+	if ( Controls.state.slide_on )
+	{
+		// From keyboard...
+		adjust_ramped_keyboard_field(plus, key_pitch_forward, Controls.vertical_thrust_time, PlayerCfg.KeyboardSens[player_config_keyboard_index::slide_ud], speed_factor);
+		adjust_ramped_keyboard_field(minus, key_pitch_backward, Controls.vertical_thrust_time, PlayerCfg.KeyboardSens[player_config_keyboard_index::slide_ud], speed_factor);
+		// From joystick...
+		// NOTE: Use Slide U/D invert setting
+#if defined(dxx_kconfig_ui_kc_joystick_pitch_ud) && defined(dxx_kconfig_ui_kc_joystick_slide_ud)
+		adjust_axis_field(Controls.vertical_thrust_time, joy_axis, kcm_joystick[dxx_kconfig_ui_kc_joystick_pitch_ud].value, !kcm_joystick[dxx_kconfig_ui_kc_joystick_invert_slide_ud].value, PlayerCfg.JoystickSens[player_config_joystick_index::slide_ud]);
+#endif
+		// From mouse...
+#if defined(dxx_kconfig_ui_kc_mouse_pitch_ud) && defined(dxx_kconfig_ui_kc_mouse_invert_slide_ud)
+		adjust_axis_field(Controls.vertical_thrust_time, Controls.mouse_axis, kcm_mouse[dxx_kconfig_ui_kc_mouse_pitch_ud].value, kcm_mouse[dxx_kconfig_ui_kc_mouse_invert_slide_ud].value, PlayerCfg.MouseSens[player_config_mouse_index::slide_ud]);
+#endif
+	}
+	// From keyboard...
+	adjust_ramped_keyboard_field(plus, key_slide_up, Controls.vertical_thrust_time, PlayerCfg.KeyboardSens[player_config_keyboard_index::slide_ud], speed_factor);
+	adjust_ramped_keyboard_field(minus, key_slide_down, Controls.vertical_thrust_time, PlayerCfg.KeyboardSens[player_config_keyboard_index::slide_ud], speed_factor);
+	// From buttons...
+	adjust_button_time(Controls.vertical_thrust_time, Controls.state.btn_slide_up, Controls.state.btn_slide_down, speed_factor);
+	// From joystick...
+#ifdef dxx_kconfig_ui_kc_joystick_slide_ud
+	adjust_axis_field(Controls.vertical_thrust_time, joy_axis, kcm_joystick[dxx_kconfig_ui_kc_joystick_slide_ud].value, !kcm_joystick[dxx_kconfig_ui_kc_joystick_invert_slide_ud].value, PlayerCfg.JoystickSens[player_config_joystick_index::slide_ud]);
+#endif
+	// From mouse...
+#if defined(dxx_kconfig_ui_kc_mouse_slide_ud) && defined(dxx_kconfig_ui_kc_mouse_invert_slide_ud)
+	adjust_axis_field(Controls.vertical_thrust_time, Controls.mouse_axis, kcm_mouse[dxx_kconfig_ui_kc_mouse_slide_ud].value, !kcm_mouse[dxx_kconfig_ui_kc_mouse_invert_slide_ud].value, PlayerCfg.MouseSens[player_config_mouse_index::slide_ud]);
+#endif
+
+	//---------- Read heading_time -----------
+	if (!Controls.state.slide_on && !Controls.state.bank_on)
+	{
+		// From keyboard...
+		adjust_ramped_keyboard_field(plus, key_heading_right, Controls.heading_time, PlayerCfg.KeyboardSens[player_config_keyboard_index::turn_lr], speed_factor);
+		adjust_ramped_keyboard_field(minus, key_heading_left, Controls.heading_time, PlayerCfg.KeyboardSens[player_config_keyboard_index::turn_lr], speed_factor);
+#if defined(dxx_kconfig_ui_kc_joystick_turn) && defined(dxx_kconfig_ui_kc_joystick_invert_turn)
+		// From joystick...
+		adjust_axis_field(Controls.heading_time, joy_axis, kcm_joystick[dxx_kconfig_ui_kc_joystick_turn].value, !kcm_joystick[dxx_kconfig_ui_kc_joystick_invert_turn].value, PlayerCfg.JoystickSens[player_config_joystick_index::turn_lr]);
+#endif
+#if defined(dxx_kconfig_ui_kc_mouse_turn) && defined(dxx_kconfig_ui_kc_mouse_invert_turn)
+		// From mouse...
+		adjust_axis_field(Controls.heading_time, Controls.mouse_axis, kcm_mouse[dxx_kconfig_ui_kc_mouse_turn].value, !kcm_mouse[dxx_kconfig_ui_kc_mouse_invert_turn].value, PlayerCfg.MouseSens[player_config_mouse_index::turn_lr]);
+#endif
+	}
+	else Controls.heading_time = 0;
+
+	//----------- Read sideways_thrust_time -----------------
+	if ( Controls.state.slide_on )
+	{
+		// From keyboard...
+		adjust_ramped_keyboard_field(plus, key_heading_right, Controls.sideways_thrust_time, PlayerCfg.KeyboardSens[player_config_keyboard_index::slide_lr], speed_factor);
+		adjust_ramped_keyboard_field(minus, key_heading_left, Controls.sideways_thrust_time, PlayerCfg.KeyboardSens[player_config_keyboard_index::slide_lr], speed_factor);
+		// From joystick...
+#if defined(dxx_kconfig_ui_kc_joystick_turn) && defined(dxx_kconfig_ui_kc_joystick_slide_lr)
+		adjust_axis_field(Controls.sideways_thrust_time, joy_axis, kcm_joystick[dxx_kconfig_ui_kc_joystick_turn].value, !kcm_joystick[dxx_kconfig_ui_kc_joystick_invert_slide_lr].value, PlayerCfg.JoystickSens[player_config_joystick_index::slide_lr]);
+#endif
+#if defined(dxx_kconfig_ui_kc_mouse_turn) && defined(dxx_kconfig_ui_kc_mouse_invert_slide_lr)
+		// From mouse...
+		adjust_axis_field(Controls.sideways_thrust_time, Controls.mouse_axis, kcm_mouse[dxx_kconfig_ui_kc_mouse_turn].value, !kcm_mouse[dxx_kconfig_ui_kc_mouse_invert_slide_lr].value, PlayerCfg.MouseSens[player_config_mouse_index::slide_lr]);
+#endif
+	}
+	// From keyboard...
+	adjust_ramped_keyboard_field(plus, key_slide_right, Controls.sideways_thrust_time, PlayerCfg.KeyboardSens[player_config_keyboard_index::slide_lr], speed_factor);
+	adjust_ramped_keyboard_field(minus, key_slide_left, Controls.sideways_thrust_time, PlayerCfg.KeyboardSens[player_config_keyboard_index::slide_lr], speed_factor);
+	// From buttons...
+	adjust_button_time(Controls.sideways_thrust_time, Controls.state.btn_slide_right, Controls.state.btn_slide_left, speed_factor);
+#if defined(dxx_kconfig_ui_kc_joystick_slide_lr) && defined(dxx_kconfig_ui_kc_joystick_invert_slide_lr)
+	// From joystick...
+	adjust_axis_field(Controls.sideways_thrust_time, joy_axis, kcm_joystick[dxx_kconfig_ui_kc_joystick_slide_lr].value, !kcm_joystick[dxx_kconfig_ui_kc_joystick_invert_slide_lr].value, PlayerCfg.JoystickSens[player_config_joystick_index::slide_lr]);
+#endif
+#if defined(dxx_kconfig_ui_kc_mouse_slide_lr) && defined(dxx_kconfig_ui_kc_mouse_invert_slide_lr)
+	// From mouse...
+	adjust_axis_field(Controls.sideways_thrust_time, Controls.mouse_axis, kcm_mouse[dxx_kconfig_ui_kc_mouse_slide_lr].value, !kcm_mouse[dxx_kconfig_ui_kc_mouse_invert_slide_lr].value, PlayerCfg.MouseSens[player_config_mouse_index::slide_lr]);
+#endif
+
+	//----------- Read bank_time -----------------
+	if ( Controls.state.bank_on )
+	{
+		// From keyboard...
+		adjust_ramped_keyboard_field(plus, key_heading_left, Controls.bank_time, PlayerCfg.KeyboardSens[player_config_keyboard_index::bank_lr], speed_factor);
+		adjust_ramped_keyboard_field(minus, key_heading_right, Controls.bank_time, PlayerCfg.KeyboardSens[player_config_keyboard_index::bank_lr], speed_factor);
+		// From joystick...
+#if defined(dxx_kconfig_ui_kc_joystick_turn) && defined(dxx_kconfig_ui_kc_joystick_bank)
+		adjust_axis_field(Controls.bank_time, joy_axis, kcm_joystick[dxx_kconfig_ui_kc_joystick_turn].value, kcm_joystick[dxx_kconfig_ui_kc_joystick_invert_bank].value, PlayerCfg.JoystickSens[player_config_joystick_index::bank_lr]);
+#endif
+#if defined(dxx_kconfig_ui_kc_mouse_turn) && defined(dxx_kconfig_ui_kc_mouse_invert_bank)
+		// From mouse...
+		adjust_axis_field(Controls.bank_time, Controls.mouse_axis, kcm_mouse[dxx_kconfig_ui_kc_mouse_turn].value, !kcm_mouse[dxx_kconfig_ui_kc_mouse_invert_bank].value, PlayerCfg.MouseSens[player_config_mouse_index::bank_lr]);
+#endif
+	}
+	// From keyboard...
+	adjust_ramped_keyboard_field(plus, key_bank_left, Controls.bank_time, PlayerCfg.KeyboardSens[player_config_keyboard_index::bank_lr], speed_factor);
+	adjust_ramped_keyboard_field(minus, key_bank_right, Controls.bank_time, PlayerCfg.KeyboardSens[player_config_keyboard_index::bank_lr], speed_factor);
+	// From buttons...
+	adjust_button_time(Controls.bank_time, Controls.state.btn_bank_left, Controls.state.btn_bank_right, speed_factor);
+	// From joystick...
+#ifdef dxx_kconfig_ui_kc_joystick_bank
+	adjust_axis_field(Controls.bank_time, joy_axis, kcm_joystick[dxx_kconfig_ui_kc_joystick_bank].value, kcm_joystick[dxx_kconfig_ui_kc_joystick_invert_bank].value, PlayerCfg.JoystickSens[player_config_joystick_index::bank_lr]);
+#endif
+#if defined(dxx_kconfig_ui_kc_mouse_bank) && defined(dxx_kconfig_ui_kc_mouse_invert_bank)
+	// From mouse...
+	adjust_axis_field(Controls.bank_time, Controls.mouse_axis, kcm_mouse[dxx_kconfig_ui_kc_mouse_bank].value, !kcm_mouse[dxx_kconfig_ui_kc_mouse_invert_bank].value, PlayerCfg.MouseSens[player_config_mouse_index::bank_lr]);
+#endif
+
+	//----------- Read forward_thrust_time -------------
+	// From keyboard/buttons...
+	adjust_button_time(Controls.forward_thrust_time, Controls.state.accelerate, Controls.state.reverse, speed_factor);
+	// From joystick...
+#ifdef dxx_kconfig_ui_kc_joystick_throttle
+	adjust_axis_field(Controls.forward_thrust_time, joy_axis, kcm_joystick[dxx_kconfig_ui_kc_joystick_throttle].value, kcm_joystick[dxx_kconfig_ui_kc_joystick_invert_throttle].value, PlayerCfg.JoystickSens[player_config_joystick_index::throttle]);
+#endif
+#if defined(dxx_kconfig_ui_kc_mouse_throttle) && defined(dxx_kconfig_ui_kc_mouse_invert_throttle)
+	// From mouse...
+	adjust_axis_field(Controls.forward_thrust_time, Controls.mouse_axis, kcm_mouse[dxx_kconfig_ui_kc_mouse_throttle].value, kcm_mouse[dxx_kconfig_ui_kc_mouse_invert_throttle].value, PlayerCfg.MouseSens[player_config_mouse_index::throttle]);
+#endif
+
+	//----------- Read cruise-control-type of throttle.
+	if ( Controls.state.cruise_off > 0 ) Controls.state.cruise_off = Cruise_speed = 0;
+	else
+	{
+		adjust_button_time(Cruise_speed, Controls.state.cruise_plus, Controls.state.cruise_minus, speed_factor * 80);
+		clamp_value(Cruise_speed, 0, i2f(100));
+		if (Controls.forward_thrust_time == 0)
+			Controls.forward_thrust_time = fixmul(Cruise_speed, frametime) / 100;
+	}
+
+	//----------- Clamp values between -FrameTime and FrameTime
+	clamp_kconfig_control_with_overrun(Controls.vertical_thrust_time, frametime, Controls.excess_vertical_thrust_time, frametime * PlayerCfg.MouseOverrun[player_config_mouse_index::slide_ud]);
+	clamp_kconfig_control_with_overrun(Controls.sideways_thrust_time, frametime, Controls.excess_sideways_thrust_time, frametime * PlayerCfg.MouseOverrun[player_config_mouse_index::slide_lr]);
+	clamp_kconfig_control_with_overrun(Controls.forward_thrust_time, frametime, Controls.excess_forward_thrust_time, frametime * PlayerCfg.MouseOverrun[player_config_mouse_index::throttle]);
+	if (!allow_uncapped_turning())
+	{
+		auto pitch_frametime = frametime / LOCKED_PITCH_FACTOR;
+		if(release_pitch_lock()) {
+			pitch_frametime = frametime / FREE_PITCH_FACTOR;
+		}
+		clamp_kconfig_control_with_overrun(Controls.pitch_time, pitch_frametime, Controls.excess_pitch_time, frametime * PlayerCfg.MouseOverrun[player_config_mouse_index::pitch_ud]);
+		clamp_kconfig_control_with_overrun(Controls.heading_time, frametime, Controls.excess_heading_time, frametime * PlayerCfg.MouseOverrun[player_config_mouse_index::turn_lr]);
+		clamp_kconfig_control_with_overrun(Controls.bank_time, frametime, Controls.excess_bank_time, frametime * PlayerCfg.MouseOverrun[player_config_mouse_index::bank_lr]);
+	}
+}
+
+}
+
+void reset_cruise(void)
+{
+	Cruise_speed=0;
+}
+
+
+void kc_set_controls()
+{
+	for (auto &&[kcm, setting] : zip(kcm_keyboard, PlayerCfg.KeySettings.Keyboard))
+		kcm.oldvalue = kcm.value = setting;
+
+#if DXX_MAX_JOYSTICKS
+	for (auto &&[kcm, kc, setting] : zip(kcm_joystick, kc_joystick, PlayerCfg.KeySettings.Joystick))
+	{
+		uint8_t value = setting;
+		if (kc.type == kc_type::invert)
+		{
+			if (value != 1)
+				value = 0;
+			setting = value;
+		}
+		kcm.oldvalue = kcm.value = value;
+	}
+#endif
+
+	for (auto &&[kcm, kc, setting] : zip(kcm_mouse, kc_mouse, PlayerCfg.KeySettings.Mouse))
+	{
+		uint8_t value = setting;
+		if (kc.type == kc_type::invert)
+		{
+			if (value != 1)
+				value = 0;
+			setting = value;
+		}
+		kcm.oldvalue = kcm.value = value;
+	}
+
+	for (auto &&[kcm, setting] : zip(kcm_rebirth, PlayerCfg.KeySettingsRebirth))
+		kcm.oldvalue = kcm.value = setting;
+}

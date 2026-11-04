@@ -1,0 +1,509 @@
+/*
+ * Portions of this file are copyright Rebirth contributors and licensed as
+ * described in COPYING.txt.
+ * Portions of this file are copyright Parallax Software and licensed
+ * according to the Parallax license below.
+ * See COPYING.txt for license details.
+
+THE COMPUTER CODE CONTAINED HEREIN IS THE SOLE PROPERTY OF PARALLAX
+SOFTWARE CORPORATION ("PARALLAX").  PARALLAX, IN DISTRIBUTING THE CODE TO
+END-USERS, AND SUBJECT TO ALL OF THE TERMS AND CONDITIONS HEREIN, GRANTS A
+ROYALTY-FREE, PERPETUAL LICENSE TO SUCH END-USERS FOR USE BY SUCH END-USERS
+IN USING, DISPLAYING,  AND CREATING DERIVATIVE WORKS THEREOF, SO LONG AS
+SUCH USE, DISPLAY OR CREATION IS FOR NON-COMMERCIAL, ROYALTY OR REVENUE
+FREE PURPOSES.  IN NO EVENT SHALL THE END-USER USE THE COMPUTER CODE
+CONTAINED HEREIN FOR REVENUE-BEARING PURPOSES.  THE END-USER UNDERSTANDS
+AND AGREES TO THE TERMS HEREIN AND ACCEPTS THE SAME BY USE OF THIS FILE.
+COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
+*/
+
+/*
+ *
+ * Code to render cool external-scene terrain
+ *
+ */
+
+#include <bitset>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <type_traits>
+
+#include "3d.h"
+#include "dxxerror.h"
+#include "gr.h"
+#include "texmap.h"
+#include "iff.h"
+#include "u_mem.h"
+#include "inferno.h"
+#include "textures.h"
+#include "object.h"
+#include "endlevel.h"
+#include "render.h"
+#include "player.h"
+#include "segment.h"
+#include "terrain.h"
+#include <memory>
+
+namespace dcx {
+
+namespace {
+
+constexpr std::size_t GRID_MAX_SIZE{64};
+constexpr fix GRID_SCALE{i2f(2 * 20)};
+constexpr fix HEIGHT_SCALE{f1_0};
+
+// Valid values: [0 .. GRID_MAX_SIZE]
+uint8_t g_grid_w;
+uint8_t g_grid_h;
+
+static RAIIdmem<ubyte[]> height_array;
+static std::unique_ptr<uint8_t[]> light_array;
+
+#define HEIGHT(_i,_j) (height_array[(_i)*grid_w+(_j)])
+#define LIGHT(_i,_j) light_array[(_i)*grid_w+(_j)]
+
+#define LIGHTVAL(_i,_j) (static_cast<fix>(LIGHT(_i, _j)) << 8)
+
+static grs_bitmap *terrain_bm;
+[[nodiscard]]
+static std::unique_ptr<uint8_t[]> build_light_table(std::size_t grid_w, std::size_t grid_h);
+
+}
+
+}
+
+namespace {
+
+// ------------------------------------------------------------------------
+static void draw_cell(grs_canvas &canvas, const vms_vector &Viewer_eye, const int i, const int j, g3_draw_tmap_point &p0, g3_draw_tmap_point &p1, g3_draw_tmap_point &p2, g3_draw_tmap_point &p3, int &mine_tiles_drawn, const int org_i, const int org_j, const std::size_t grid_w, const uint8_t *const light_array)
+{
+	std::array<g3_draw_tmap_point *, 3> pointlist{{
+		&p0,
+		&p1,
+		&p3,
+	}};
+
+	const fix lightval_i0j0{LIGHTVAL(i, j)};
+	const fix lightval_i0j1{LIGHTVAL(i, j + 1)};
+	const fix lightval_i1j0{LIGHTVAL(i + 1, j)};
+	g3_check_and_draw_tmap(canvas, pointlist, (std::array<g3s_uvl, 3>{{
+		{
+			.u = i * f1_0 / 4,
+			.v = j * f1_0 / 4,
+			.l = lightval_i0j0,
+		},
+		{
+			.u = i * f1_0 / 4,
+			.v = (j + 1) * f1_0 / 4,
+			.l = lightval_i0j1,
+		},
+		{
+			.u = (i + 1) * f1_0 / 4,
+			.v = j * f1_0 / 4,
+			.l = lightval_i1j0,
+		},
+	}}), (std::array<g3s_lrgb, 3>{{
+		{
+			.r = lightval_i0j0,
+			.g = lightval_i0j0,
+			.b = lightval_i0j0,
+		},
+		{
+			.r = lightval_i0j1,
+			.g = lightval_i0j1,
+			.b = lightval_i0j1,
+		},
+		{
+			.r = lightval_i1j0,
+			.g = lightval_i1j0,
+			.b = lightval_i1j0,
+		},
+	}}), *terrain_bm, draw_tmap);
+
+	pointlist[0] = &p1;
+	pointlist[1] = &p2;
+	const fix lightval_i1j1{LIGHTVAL(i + 1, j + 1)};
+	g3_check_and_draw_tmap(canvas, pointlist, (std::array<g3s_uvl, 3>{{
+		{
+			.u = i * f1_0 / 4,
+			.v = (j + 1) * f1_0 / 4,
+			.l = lightval_i0j1,
+		},
+		{
+			.u = (i + 1) * f1_0 / 4,
+			.v = (j + 1) * f1_0 / 4,
+			.l = lightval_i1j1,
+		},
+		{
+			.u = (i + 1) * f1_0 / 4,
+			.v = j * f1_0 / 4,
+			.l = lightval_i1j0,
+		},
+	}}), (std::array<g3s_lrgb, 3>{{
+		{
+			.r = lightval_i0j1,
+			.g = lightval_i0j1,
+			.b = lightval_i0j1,
+		},
+		{
+			.r = lightval_i1j1,
+			.g = lightval_i1j1,
+			.b = lightval_i1j1,
+		},
+		{
+			.r = lightval_i1j0,
+			.g = lightval_i1j0,
+			.b = lightval_i1j0,
+		},
+	}}), *terrain_bm, draw_tmap);
+
+	if (i==org_i && j==org_j)
+		mine_tiles_drawn |= 1;
+	if (i==org_i-1 && j==org_j)
+		mine_tiles_drawn |= 2;
+	if (i==org_i && j==org_j-1)
+		mine_tiles_drawn |= 4;
+	if (i==org_i-1 && j==org_j-1)
+		mine_tiles_drawn |= 8;
+
+	if (mine_tiles_drawn == 0xf) {
+		//draw_exit_model();
+		mine_tiles_drawn=-1;
+		window_rendered_data window;
+		render_mine(canvas, Viewer_eye, PlayerUniqueEndlevelState.exit_segnum, 0, window);
+		//if (ext_expl_playing)
+		//	draw_fireball(&external_explosion);
+	}
+}
+
+class terrain_y_cache
+{
+	static const std::size_t cache_size = 256;
+	std::bitset<cache_size> yc_flags;
+	std::array<vms_vector, cache_size> y_cache;
+public:
+	vms_vector &operator()(uint_fast32_t h);
+};
+
+vms_vector &terrain_y_cache::operator()(uint_fast32_t h)
+{
+	auto &dyp = y_cache[h];
+	if (auto &&ycf = yc_flags[h])
+	{
+	}
+	else
+	{
+		ycf = 1;
+		dyp = g3_rotate_delta_vec(vm_vec_copy_scale(surface_orient.uvec, h * HEIGHT_SCALE));
+	}
+	return dyp;
+}
+
+}
+
+void render_terrain(grs_canvas &canvas, const vms_vector &Viewer_eye, const vms_vector &org_point,int org_2dx,int org_2dy)
+{
+	g3s_point p,save_p_low,save_p_high;
+	g3s_point last_p2;
+	int i,j;
+	int low_i,high_i,low_j,high_j;
+	int viewer_i,viewer_j;
+	const auto org_i{org_2dy};
+	const auto org_j{org_2dx};
+
+	const std::size_t grid_w{g_grid_w};
+	const std::size_t grid_h{g_grid_h};
+	low_i = 0;  high_i = grid_w-1;
+	low_j = 0;  high_j = grid_h-1;
+
+	//@@start_point.x = org_point->x - GRID_SCALE*(org_i - low_i);
+	//@@start_point.z = org_point->z - GRID_SCALE*(org_j - low_j);
+	//@@start_point.y = org_point->y;
+	terrain_y_cache get_dy_vec;
+
+#if !DXX_USE_OGL
+	Interpolation_method = 1;
+#endif
+
+	const auto delta_i{g3_rotate_delta_vec(vm_vec_copy_scale(surface_orient.rvec, GRID_SCALE))};
+	const auto delta_j{g3_rotate_delta_vec(vm_vec_copy_scale(surface_orient.fvec, GRID_SCALE))};
+
+	auto start_point{vm_vec_scale_add(org_point, surface_orient.rvec, -(org_i - low_i) * GRID_SCALE)};
+	vm_vec_scale_add2(start_point,surface_orient.fvec,-(org_j - low_j)*GRID_SCALE);
+
+	{
+		const auto tv{vm_vec_build_sub(Viewer->pos, start_point)};
+	viewer_i = vm_vec_build_dot(tv,surface_orient.rvec) / GRID_SCALE;
+	viewer_j = vm_vec_build_dot(tv,surface_orient.fvec) / GRID_SCALE;
+	}
+
+	auto last_p = g3_rotate_point(start_point);
+	save_p_low = last_p;
+
+	g3s_point save_row[GRID_MAX_SIZE]{};
+	// Is this needed?
+	for (j=low_j;j<=high_j;j++) {
+		g3_add_delta_vec(save_row[j],last_p,get_dy_vec(HEIGHT(low_i,j)));
+		if (j==high_j)
+			save_p_high = last_p;
+		else
+			g3_add_delta_vec(last_p,last_p,delta_j);
+	}
+
+	/* There is no g3_sub_delta_vec, so prepare a negated version of delta_j
+	 * for use with g3_add_delta_vec in the cases where g3_sub_delta_vec would
+	 * be used.
+	 */
+	const auto neg_delta_j{vm_vec_build_negated(delta_j)};
+	int mine_tiles_drawn{0};    //flags to tell if all 4 tiles under mine have drawn
+	for (i=low_i;i<viewer_i;i++) {
+
+		g3_add_delta_vec(save_p_low,save_p_low,delta_i);
+		last_p = save_p_low;
+		g3_add_delta_vec(last_p2,last_p,get_dy_vec(HEIGHT(i+1,low_j)));
+		
+		for (j=low_j;j<viewer_j;j++) {
+			g3s_point p2;
+
+			g3_add_delta_vec(p,last_p,delta_j);
+			g3_add_delta_vec(p2,p,get_dy_vec(HEIGHT(i+1,j+1)));
+
+			draw_cell(canvas, Viewer_eye, i, j, save_row[j], save_row[j+1], p2, last_p2, mine_tiles_drawn, org_i, org_j, grid_w, light_array.get());
+
+			last_p = p;
+			save_row[j] = last_p2;
+			last_p2 = p2;
+
+		}
+
+		g3_add_delta_vec(save_p_high,save_p_high,delta_i);
+		last_p = save_p_high;
+		g3_add_delta_vec(last_p2,last_p,get_dy_vec(HEIGHT(i+1,high_j)));
+		
+		for (j=high_j-1;j>=viewer_j;j--) {
+			g3s_point p2;
+
+			g3_add_delta_vec(p, last_p, neg_delta_j);
+			g3_add_delta_vec(p2,p,get_dy_vec(HEIGHT(i+1,j)));
+
+			draw_cell(canvas, Viewer_eye, i, j, save_row[j], save_row[j+1], last_p2, p2, mine_tiles_drawn, org_i, org_j, grid_w, light_array.get());
+
+			last_p = p;
+			save_row[j+1] = last_p2;
+			last_p2 = p2;
+
+		}
+
+		save_row[j+1] = last_p2;
+	}
+
+	//now do i from other end
+
+	//going the other way now...
+	const auto neg_delta_i{vm_vec_build_negated(delta_i)};
+
+	//@@start_point.x += (high_i-low_i)*GRID_SCALE;
+	vm_vec_scale_add2(start_point,surface_orient.rvec,(high_i-low_i)*GRID_SCALE);
+	g3_rotate_point(last_p,start_point);
+	save_p_low = last_p;
+
+	for (j=low_j;j<=high_j;j++) {
+		g3_add_delta_vec(save_row[j],last_p,get_dy_vec(HEIGHT(high_i,j)));
+		if (j==high_j)
+			save_p_high = last_p;
+		else
+			g3_add_delta_vec(last_p,last_p,delta_j);
+	}
+
+	for (i=high_i-1;i>=viewer_i;i--) {
+
+		g3_add_delta_vec(save_p_low, save_p_low, neg_delta_i);
+		last_p = save_p_low;
+		g3_add_delta_vec(last_p2,last_p,get_dy_vec(HEIGHT(i,low_j)));
+		
+		for (j=low_j;j<viewer_j;j++) {
+			g3s_point p2;
+
+			g3_add_delta_vec(p,last_p,delta_j);
+			g3_add_delta_vec(p2,p,get_dy_vec(HEIGHT(i,j+1)));
+
+			draw_cell(canvas, Viewer_eye, i, j, last_p2, p2, save_row[j+1], save_row[j], mine_tiles_drawn, org_i, org_j, grid_w, light_array.get());
+
+			last_p = p;
+			save_row[j] = last_p2;
+			last_p2 = p2;
+
+		}
+
+		g3_add_delta_vec(save_p_high, save_p_high, neg_delta_i);
+		last_p = save_p_high;
+		g3_add_delta_vec(last_p2,last_p,get_dy_vec(HEIGHT(i,high_j)));
+		
+		for (j=high_j-1;j>=viewer_j;j--) {
+			g3s_point p2;
+
+			g3_add_delta_vec(p, last_p, neg_delta_j);
+			g3_add_delta_vec(p2,p,get_dy_vec(HEIGHT(i,j)));
+
+			draw_cell(canvas, Viewer_eye, i, j, p2, last_p2, save_row[j+1], save_row[j], mine_tiles_drawn, org_i, org_j, grid_w, light_array.get());
+
+			last_p = p;
+			save_row[j+1] = last_p2;
+			last_p2 = p2;
+
+		}
+		save_row[j+1] = last_p2;
+	}
+}
+
+namespace dcx {
+
+void free_height_array()
+{
+	height_array.reset();
+}
+
+}
+
+void load_terrain(const char *filename)
+{
+	grs_bitmap height_bitmap;
+	if (const auto iff_error{iff_read_bitmap(filename, height_bitmap, NULL)}; iff_error != iff_status_code::no_error)
+	{
+		Error("File %s - IFF error: %s",filename,iff_errormsg(iff_error));
+	}
+	const std::size_t grid_w{height_bitmap.bm_w};
+	const std::size_t grid_h{height_bitmap.bm_h};
+
+	Assert(grid_w <= GRID_MAX_SIZE);
+	Assert(grid_h <= GRID_MAX_SIZE);
+
+	height_array.reset(height_bitmap.get_bitmap_data());
+
+	if (!(grid_w <= GRID_MAX_SIZE)) [[unlikely]]
+		return;
+	if (!(grid_h <= GRID_MAX_SIZE)) [[unlikely]]
+		return;
+	g_grid_w = grid_w;
+	g_grid_h = grid_h;
+
+	uint8_t min_h{UINT8_MAX};
+	const xrange xgrid_w{grid_w}, xgrid_h{grid_h};
+	for (const auto i : xgrid_w)
+		for (const auto j : xgrid_h)
+		{
+			const uint8_t h{HEIGHT(i,j)};
+			if (h < min_h)
+				min_h = h;
+		}
+
+	for (const auto i : xgrid_w)
+		for (const auto j : xgrid_h)
+			HEIGHT(i,j) -= min_h;
+
+	terrain_bm = terrain_bitmap;
+	light_array = build_light_table(grid_w, grid_h);
+}
+
+namespace dcx {
+
+namespace {
+
+static vms_vector get_pnt(const std::size_t entry_i, const std::size_t entry_j, const std::size_t grid_w, const std::size_t grid_h)
+{
+	/* On 1999-02-20, adb added logic to clamp the inputs to avoid reading off
+	 * the end of the height_array.  The clamp logic was later rewritten, but
+	 * the intent remains.
+	 */
+	/* Despite the type, `grid_w` and `grid_h` are constrained by calling code
+	 * to be not above `GRID_MAX_SIZE`.  Therefore, the clamped values can be
+	 * stored in `uint8_t`.
+	 */
+	uint8_t clamped_i, clamped_j;
+	if (entry_i >= grid_h) [[unlikely]]
+		clamped_i = grid_h - 1;
+	else
+		clamped_i = entry_i;
+	if (clamped_i == grid_h - 1 && entry_j >= grid_w) [[unlikely]]
+		clamped_j = grid_w - 1;
+	else
+		clamped_j = entry_j;
+	return {
+		.x = GRID_SCALE * clamped_i,
+		.y = HEIGHT(clamped_i, clamped_j) * HEIGHT_SCALE,
+		.z = GRID_SCALE * clamped_j,
+	};
+}
+
+constexpr vms_vector light{0x2e14,0xe8f5,0x5eb8};
+
+static fix get_face_light(const vms_vector &p0,const vms_vector &p1,const vms_vector &p2)
+{
+	const auto norm{vm_vec_normal(p0, p1, p2)};
+	return -vm_vec_build_dot(norm,light);
+}
+
+/* `i` and `j` must never be below 1 on entry, to avoid underflow when calling
+ * `get_pnt`.
+ */
+static fix get_avg_light(const std::size_t i, const std::size_t j, const std::size_t grid_w, const std::size_t grid_h)
+{
+	const auto pp{get_pnt(i, j, grid_w, grid_h)};
+	const std::array<vms_vector, 6> p{{
+		get_pnt(i - 1, j, grid_w, grid_h),
+		get_pnt(i, j - 1, grid_w, grid_h),
+		get_pnt(i + 1, j - 1, grid_w, grid_h),
+		get_pnt(i + 1, j, grid_w, grid_h),
+		get_pnt(i, j + 1, grid_w, grid_h),
+		get_pnt(i - 1, j + 1, grid_w, grid_h),
+	}};
+
+	fix sum{0};
+	for (const auto f : constant_xrange<std::size_t{0}, 6u>{})
+		sum += get_face_light(pp, p[f], p[(f + 1) % 5]);
+
+	return sum/6;
+}
+
+static std::unique_ptr<uint8_t[]> build_light_table(const std::size_t grid_w, const std::size_t grid_h)
+{
+	std::size_t alloc = grid_w*grid_h;
+	std::unique_ptr<uint8_t[]> light_array{std::make_unique<uint8_t[]>(alloc)};
+	fix min_l = INT32_MAX, max_l = 0;
+	const xrange<std::size_t, std::integral_constant<std::size_t, 1>> xgrid_w{grid_w},
+		xgrid_h{grid_h};
+	for (const auto i : xgrid_w)
+		for (const auto j : xgrid_h)
+		{
+			const auto l{get_avg_light(i, j, grid_w, grid_h)};
+			if (l > max_l)
+				max_l = l;
+			if (l < min_l)
+				min_l = l;
+		}
+
+	for (const auto i : xgrid_w)
+		for (const auto j : xgrid_h)
+		{
+			const auto l{get_avg_light(i, j, grid_w, grid_h)};
+
+			if (min_l == max_l) {
+				LIGHT(i,j) = l>>8;
+				continue;
+			}
+
+			auto l2{fixdiv((l - min_l), (max_l - min_l))};
+
+			if (l2==f1_0)
+				l2--;
+
+			LIGHT(i,j) = l2>>8;
+
+		}
+	return light_array;
+}
+
+}
+
+}

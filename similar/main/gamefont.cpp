@@ -1,0 +1,226 @@
+/*
+ * Portions of this file are copyright Rebirth contributors and licensed as
+ * described in COPYING.txt.
+ * Portions of this file are copyright Parallax Software and licensed
+ * according to the Parallax license below.
+ * See COPYING.txt for license details.
+
+THE COMPUTER CODE CONTAINED HEREIN IS THE SOLE PROPERTY OF PARALLAX
+SOFTWARE CORPORATION ("PARALLAX").  PARALLAX, IN DISTRIBUTING THE CODE TO
+END-USERS, AND SUBJECT TO ALL OF THE TERMS AND CONDITIONS HEREIN, GRANTS A
+ROYALTY-FREE, PERPETUAL LICENSE TO SUCH END-USERS FOR USE BY SUCH END-USERS
+IN USING, DISPLAYING,  AND CREATING DERIVATIVE WORKS THEREOF, SO LONG AS
+SUCH USE, DISPLAY OR CREATION IS FOR NON-COMMERCIAL, ROYALTY OR REVENUE
+FREE PURPOSES.  IN NO EVENT SHALL THE END-USER USE THE COMPUTER CODE
+CONTAINED HEREIN FOR REVENUE-BEARING PURPOSES.  THE END-USER UNDERSTANDS
+AND AGREES TO THE TERMS HEREIN AND ACCEPTS THE SAME BY USE OF THIS FILE.
+COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
+*/
+
+/*
+ *
+ * Fonts for the game.
+ *
+ */
+
+#include <stdlib.h>
+#include <stdio.h>
+
+#include "gr.h"
+#include "dxxerror.h"
+#include <string.h>
+#include "args.h"
+#include "physfsx.h"
+#include "gamefont.h"
+#include "mission.h"
+#if DXX_USE_OGL
+#include "ogl_init.h"
+#endif
+#include "config.h"
+#include "console.h"
+
+#include "d_enumerate.h"
+#include "partial_range.h"
+
+namespace dcx {
+
+per_gamefont_index_array<loaded_game_font> Gamefonts;
+
+namespace {
+
+	/* Low-resolution fonts need 11 characters for the name, plus one for the
+	 * null.  High-resolution fonts need 12 characters for the name, plus one
+	 * for the null.  Round up to 16 for alignment and easy indexing math.
+	 */
+using font_filename = std::array<char, 16>;
+
+/* Both Descent 1 and Descent 2 ship fonts with these filenames.
+ * For Descent 1 PC and for Descent 2, these fonts are low-resolution files.
+ * For Descent 1 Mac, `font1-1.fnt` is low-resolution, and the rest are high
+ * resolution.
+ */
+constexpr per_gamefont_index_array<font_filename> Gamefont_filenames_l{{{
+	{{"font1-1.fnt"}}, // Font 0
+	{{"font2-1.fnt"}}, // Font 1
+	{{"font2-2.fnt"}}, // Font 2
+	{{"font2-3.fnt"}}, // Font 3
+	{{"font3-1.fnt"}}  // Font 4
+}}};
+
+/* Only Descent 2 ships fonts with these filenames.  However, D1X-Rebirth has
+ * the ability to read high resolution fonts, and should prefer them when the
+ * user's window dimensions are 640x480 or higher.  Therefore, these filenames
+ * are defined in both games, and are probed in both games, even though
+ * D1X-Rebirth will only find these files if the user has provided them outside
+ * the game's original data files.  D2X-Rebirth should always have access to
+ * these files.
+ *
+ * In both games, the user can choose not to load these files, via
+ * `CGameArg.GfxSkipHiresFNT`.
+ */
+constexpr per_gamefont_index_array<font_filename> Gamefont_filenames_h{{{
+	{{"font1-1h.fnt"}}, // Font 0
+	{{"font2-1h.fnt"}}, // Font 1
+	{{"font2-2h.fnt"}}, // Font 2
+	{{"font2-3h.fnt"}}, // Font 3
+	{{"font3-1h.fnt"}}  // Font 4
+}}};
+
+}
+
+font_x_scale_proportion FNTScaleX;
+font_y_scale_proportion FNTScaleY;
+
+}
+
+void gamefont_choose_game_font(int scrx,int scry){
+	for (const auto &&[gf, fc] : enumerate(Gamefonts))
+	{
+		int close{-1};
+		const loaded_game_font::a_gamefont_conf *best_gamefont{nullptr};
+		for (const auto &f : partial_range(fc.fontconf, fc.total_fonts_loaded))
+			if ((scrx >= f.expected_screen_resolution_x && close < f.expected_screen_resolution_x) && (scry >= f.expected_screen_resolution_y && close < f.expected_screen_resolution_y))
+			{
+				close = f.expected_screen_resolution_x;
+				best_gamefont = &f;
+			}
+		if (best_gamefont == nullptr)
+		{
+			FNTScaleX = {};
+			FNTScaleY = {};
+			con_printf(CON_CRITICAL, "No suitable font file found for font %u for window dimensions %ix%i; using default scaling", static_cast<unsigned>(gf), scrx, scry);
+		}
+		else
+		{
+
+#if DXX_USE_OGL
+	if (!CGameArg.OglFixedFont)
+	{
+		// if there's no texture filtering, scale by int
+		auto &f{*best_gamefont};
+		if (CGameCfg.TexFilt == opengl_texture_filter::classic)
+		{
+			FNTScaleX.reset(scrx / f.expected_screen_resolution_x);
+			FNTScaleY.reset(scry / f.expected_screen_resolution_y);
+		}
+		else
+		{
+			FNTScaleX.reset(static_cast<float>(scrx) / f.expected_screen_resolution_x);
+			FNTScaleY.reset(static_cast<float>(scry) / f.expected_screen_resolution_y);
+		}
+
+		// keep proportions
+#if DXX_BUILD_DESCENT == 1
+#define DXX_FONT_SCALE_MULTIPLIER	1
+#elif DXX_BUILD_DESCENT == 2
+#define DXX_FONT_SCALE_MULTIPLIER	100
+#endif
+		if (FNTScaleY*DXX_FONT_SCALE_MULTIPLIER < FNTScaleX*DXX_FONT_SCALE_MULTIPLIER)
+			FNTScaleX.reset(FNTScaleY.operator float());
+		else if (FNTScaleX*DXX_FONT_SCALE_MULTIPLIER < FNTScaleY*DXX_FONT_SCALE_MULTIPLIER)
+			FNTScaleY.reset(FNTScaleX.operator float());
+	}
+#endif
+		}
+		fc.font = gr_init_font(*grd_curcanv, best_gamefont->name);
+	}
+}
+
+namespace dsx {
+
+namespace {
+
+/* For Descent 1, one caller needs to detect whether the load succeeded, so
+ * return a `bool` reporting success versus failure.
+ * For Descent 2, no caller needs to detect whether the load succeeded, so
+ * return `void`.
+ */
+#if DXX_BUILD_DESCENT == 1
+#define DXX_addfontconf_return_type bool
+#define DXX_addfontconf_return_value
+#elif DXX_BUILD_DESCENT == 2
+#define DXX_addfontconf_return_type void
+#define DXX_addfontconf_return_value (void)
+#endif
+static DXX_addfontconf_return_type addfontconf(loaded_game_font &fc, const uint16_t expected_screen_resolution_x, const uint16_t expected_screen_resolution_y, const font_filename &fn)
+#undef DXX_addfontconf_return_type
+{
+	if (!PHYSFS_exists(fn.data()))
+		/* File not found - load failed */
+		return DXX_addfontconf_return_value(false);
+
+	auto &f{fc.fontconf[fc.total_fonts_loaded]};
+	++ fc.total_fonts_loaded;
+	f.expected_screen_resolution_x = {expected_screen_resolution_x};
+	f.expected_screen_resolution_y = {expected_screen_resolution_y};
+	f.name = fn;
+	/* File found - presume the load will succeed when the file is eventually
+	 * opened and read.
+	 */
+	return DXX_addfontconf_return_value(true);
+#undef DXX_addfontconf_return_value
+}
+
+}
+
+void gamefont_init()
+{
+	for (auto &&[i, gf] : enumerate(Gamefonts))
+	{
+		gf.font = nullptr;
+		constexpr uint16_t high_resolution_x{640};
+		constexpr uint16_t high_resolution_y{480};
+		constexpr uint16_t low_resolution_x{320};
+		constexpr uint16_t low_resolution_y{200};
+
+#if DXX_BUILD_DESCENT == 1
+		if (MacHog && (i != gamefont_index::big))
+		{
+			/* Mac fonts are high-resolution (except for the "big" one), even
+			 * when stored in the low-resolution filename.  Try to add the Mac
+			 * font first.  If successful, continue, since adding the standard
+			 * high-resolution font would be redundant, and there is no
+			 * low-resolution font available.
+			 *
+			 * On failure, fall back to trying to add a high-resolution font if
+			 * the user has provided one.  These are not included in the normal
+			 * game data, but users could supply them via an add-on.
+			 */
+			if (addfontconf(gf, high_resolution_x, high_resolution_y, Gamefont_filenames_l[i]))
+				continue;
+			if (!CGameArg.GfxSkipHiresFNT)
+				addfontconf(gf, high_resolution_x, high_resolution_y, Gamefont_filenames_h[i]); // ZICO - addition to use D2 fonts if available
+			/* Both filenames have now been tried, so continue.
+			 */
+			continue;
+		}
+#endif
+		/* If the above special case does not apply, add the Descent 2
+		 * high-resolution font first, then add the low-resolution font.
+		 */
+		if (!CGameArg.GfxSkipHiresFNT)
+			addfontconf(gf, high_resolution_x, high_resolution_y, Gamefont_filenames_h[i]);
+		addfontconf(gf, low_resolution_x, low_resolution_y, Gamefont_filenames_l[i]);
+	}
+}
+}

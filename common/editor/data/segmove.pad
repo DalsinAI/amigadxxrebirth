@@ -1,0 +1,28 @@
+Segment rotation  
+ÚÄÄÄÄÄÄÄÄÂÄÄÄÄÄÄÄÄÂÄÄÄÄÄÄÄÄÂÄÄÄÄÄÄÄÄ¿
+³ Num    ³ /      ³ *      ³ -      ³
+³ Lock   ³        ³        ³        ³
+³        ³        ³        ³        ³
+ÃÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄ´
+³ 7      ³ Pitch  ³ 9      ³        ³
+³ Home   ³ Forward³ PgUp   ³        ³
+³        ³        ³        ³        ³
+ÃÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄ´ +      ³
+³ Rotate ³ 5      ³ Rotate ³        ³
+³  Left  ³        ³ Right  ³        ³
+³        ³        ³        ³        ³
+ÃÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄ´
+³  Bank  ³ Pitch  ³  Bank  ³        ³
+³  Left  ³Backward³  Right ³        ³
+³        ³        ³        ³        ³
+ÃÄÄÄÄÄÄÄÄÁÄÄÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄ´ Enter  ³
+³ 0               ³ .      ³        ³
+³ Ins             ³ Del    ³        ³
+³                 ³        ³        ³
+ÀÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÁÄÄÄÄÄÄÄÄÁÄÄÄÄÄÄÄÄÙ
+{Ctrl}{Pad8}		med-segmove-increase-pitch
+{Ctrl}{Pad2}		med-segmove-decrease-pitch
+{Ctrl}{Pad4}		med-segmove-decrease-heading
+{Ctrl}{Pad6}		med-segmove-increase-heading
+{Ctrl}{Pad1}		med-segmove-decrease-bank
+{Ctrl}{Pad3}		med-segmove-increase-bank

@@ -1,0 +1,35 @@
+/*
+ * This file is part of the DXX-Rebirth project <https://github.com/dxx-rebirth/dxx-rebirth/>.
+ * It is copyright by its individual contributors, as recorded in the
+ * project's Git history.  See COPYING.txt at the top level for license
+ * terms and a link to the Git history.
+ */
+
+#pragma once
+
+#include <span>
+#include <stdarg.h>
+#include "dxxsconf.h"
+#include "dsx-ns.h"
+#include "fmtcheck.h"
+#include "fwd-gr.h"
+
+#define HUD_MAX_NUM_DISP	4
+#define HUD_MAX_NUM_STOR	20
+
+// classes - expanded whenever needed
+#define HM_DEFAULT		1 // just some normal message
+#define HM_MULTI		2 // a message related to multiplayer (game and player messages)
+#define HM_REDUNDANT		4 // "you already have..."-type messages. stuff a player is able to supress
+#define HM_MAYDUPL		8 // messages that might appear once per frame. for these we want to check all messages we have  in queue and supress it if so
+
+extern int HUD_toolong;
+extern void HUD_clear_messages();
+#ifdef DXX_BUILD_DESCENT
+namespace dsx {
+void HUD_render_message_frame(grs_canvas &);
+}
+#endif
+int HUD_init_message(int class_flag, const char * format, ... ) dxx_compiler_attribute_format_printf(2, 3);
+int HUD_init_message_va(int class_flag, const char * format, va_list args) dxx_compiler_attribute_format_printf(2, 0);
+int HUD_init_message_literal(int class_flag, std::span<const char> str);
