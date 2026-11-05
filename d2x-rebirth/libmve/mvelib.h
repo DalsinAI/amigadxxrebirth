@@ -22,6 +22,18 @@
 #include "d_uspan.h"
 #include "physfsrwops.h"
 
+#ifdef __amigaos__
+/* The movie's audio callback runs on acsdl12's sound process, and the
+ * port's pthread stubs make std::mutex lock nothing. So the audio ring is
+ * guarded by the sound lock instead: the sound process holds it around the
+ * callback, and an exec semaphore nests on one task. */
+struct mve_audio_lock
+{
+	void lock() { SDL_LockAudio(); }
+	void unlock() { SDL_UnlockAudio(); }
+};
+#endif
+
 namespace dsx {
 
 #if DXX_USE_SDLMIXER && SDL_MAJOR_VERSION == 2
@@ -146,7 +158,11 @@ struct MVESTREAM
 	int mve_audio_bufhead{};
 	int mve_audio_buftail{};
 	int mve_audio_curbuf_curpos{};
+#ifdef __amigaos__
+	mve_audio_lock mve_audio_mutex;
+#else
 	std::mutex mve_audio_mutex;
+#endif
 	unsigned char *vBackBuf1{};
 	unsigned char *vBackBuf2{};
 	std::array<::dcx::unique_span<int16_t>, 64> mve_audio_buffers;
