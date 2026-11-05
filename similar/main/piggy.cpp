@@ -480,7 +480,12 @@ bitmap_index piggy_find_bitmap(const std::span<const char> entry_name)
 
 int piggy_find_sound(const std::span<const char> name)
 {
-	const auto i = hashtable_search(&AllDigiSndNames, name.data());
+	/* The span may point into a longer string, such as "laser03.raw" from
+	 * bitmaps.tbl, so search with a terminated copy of just the span.
+	 */
+	std::array<char, FILENAME_LEN> key{};
+	std::memcpy(key.data(), name.data(), std::min(key.size() - 1, name.size()));
+	const auto i = hashtable_search(&AllDigiSndNames, key.data());
 	if ( i < 0 )
 		return 255;
 	return i;
