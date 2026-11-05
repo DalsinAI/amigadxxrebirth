@@ -48,6 +48,15 @@ What this build leaves out
 - Keys the Amiga does not have (Home, End, Page Up/Down, Insert, Pause,
   F11, F12) cannot be bound.
 
+Known issues
+------------
+
+- Esc does nothing during a game. Right Amiga+Q brings up "Abort game?"
+  (and on the menus, the quit question) instead.
+- Descent 2's movies need the full game's CD data (the *.mvl files); the
+  demo has none, so the Descent 2 intro movie is untested in the lab.
+  Descent 1 (shareware 1.0 and 1.4) has been played in the lab.
+
 Building
 --------
 
