@@ -1,0 +1,28 @@
+{
+  "about": "The Workbench icons of the Descent2 drawer: python3 AMICRADLE/scripts/port_icons.py amiga/icons-d2x/icons.json --out amiga/icons-d2x (DalsinAI/amicradle). The art is D2X-Rebirth's own program icon (d2x-rebirth/d2x-rebirth.png). Descent2-drawer.info is the drawer's own icon, Descent2.info beside the drawer; it has its own name here so as not to meet the program's Descent2.info.",
+  "drawer": {
+    "name": "Descent2",
+    "file": "Descent2-drawer.info"
+  },
+  "badge": "art/d2x-rebirth.png",
+  "icons": [
+    {
+      "file": "Descent2.info",
+      "kind": "tool",
+      "stack": 524288
+    },
+    {
+      "file": "ReadMe.info",
+      "kind": "readme"
+    },
+    {
+      "file": "COPYING.info",
+      "kind": "readme"
+    },
+    {
+      "file": "Data.info",
+      "kind": "drawer",
+      "type": "drawer"
+    }
+  ]
+}
