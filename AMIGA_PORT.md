@@ -1,10 +1,11 @@
-D1X-Rebirth for AmigaOS 3.x
-===========================
+D1X-Rebirth and D2X-Rebirth for AmigaOS 3.x
+===========================================
 
-This is DXX-Rebirth's Descent 1 engine (D1X-Rebirth) for AmigaOS 3.x on a
-68040 or 68060 with FPU, drawn with DXX's own software renderer on an
-8-bit screen (AGA or RTG) through acsdl12, the AmiCradle Team's SDL 1.2.
-Descent 2 is not part of this port.
+These are DXX-Rebirth's Descent 1 and Descent 2 engines (D1X-Rebirth,
+the Descent program, and D2X-Rebirth, the Descent2 program) for
+AmigaOS 3.x on a 68040 or 68060 with FPU, drawn with DXX's own software
+renderer on an 8-bit screen (AGA or RTG) through acsdl12, the AmiCradle
+Team's SDL 1.2. Each game has its own drawer.
 
 Upstream: https://github.com/dxx-rebirth/dxx-rebirth, revision
 6943b924bea749543ef5729f31a28345e79716d2 (master of 2026-10-11).
@@ -18,8 +19,15 @@ Running it
 2. Double-click Descent. The icon asks for a 512 KB stack; from a Shell,
    "Stack 524288" first.
 
+Descent 2 is the same in the Descent2 drawer: put descent2.hog,
+descent2.ham and the .pig files of the full game (1.2), or d2demo.hog,
+d2demo.ham and d2demo.pig of the demo, into its Data drawer (see its
+Data/ReadMe), and double-click Descent2. The full game's movies (*.mvl)
+go there too and play through libmve; the demo has none. d2x.ini takes
+its options.
+
 Settings (descent.cfg), pilots, saved games, demos and screenshots are
-written to the Descent drawer (PROGDIR:). The screen opens at 320x200;
+written to the program's drawer (PROGDIR:). The screen opens at 320x200;
 other sizes can be picked in Options > Graphics, at a cost in speed.
 d1x.ini in the Descent drawer takes command-line options, as upstream.
 
@@ -29,8 +37,10 @@ What this build leaves out
 - Music. Descent's music is HMP (MIDI); acsdl12 plays no MIDI, and its
   SDL_mixer subset is not used (sdlmixer=0), so there is no music and no
   external OGG/MP3 music. CD audio is out too (acsdl12 has no SDL_CD).
-  Sound effects play: they come from descent.pig through DXX's own mixer
-  (digi_audio.cpp) on SDL_OpenAudio.
+  Sound effects play: they come from descent.pig (descent2.s11/s22 or
+  the pig in Descent 2) through DXX's own mixer (digi_audio.cpp) on
+  SDL_OpenAudio. Descent 2's movie sound plays through libmve on the same
+  audio, with the movie audio ring guarded by the sound lock.
 - Network games. There is no UDP stack in this build, so Multiplayer has
   nothing to start or join; the multiplayer code is built with an empty
   protocol (amiga/multi_none.cpp).
@@ -38,21 +48,32 @@ What this build leaves out
 - Keys the Amiga does not have (Home, End, Page Up/Down, Insert, Pause,
   F11, F12) cannot be bound.
 
+Known issues
+------------
+
+- Esc does nothing during a game. Right Amiga+Q brings up "Abort game?"
+  (and on the menus, the quit question) instead.
+- Descent 2's movies need the full game's CD data (the *.mvl files); the
+  demo has none, so the Descent 2 intro movie is untested in the lab.
+  Descent 1 (shareware 1.0 and 1.4) has been played in the lab.
+
 Building
 --------
 
-    make -f amiga/Makefile.amigaos -j2
+    make -f amiga/Makefile.amigaos -j2          # both games
+    make -f amiga/Makefile.amigaos -j2 d1x      # Descent only
+    make -f amiga/Makefile.amigaos -j2 d2x      # Descent2 only
 
 The defaults find GFOpenAmigaGCC 16.2.0-open4 (STOVE), the NDK, acsdl12
 and ACGame under $HOME/CradleLab; override STOVE=, NDK=, ACSDL=, ACGAME=
 as needed. The output is build/amigaos/Descent/ with Descent.info beside
-it. Each C++ file needs several hundred MB to compile; on a small machine
+it, and build/amigaos/Descent2/ with Descent2.info. Each C++ file needs several hundred MB to compile; on a small machine
 use -j1 or -j2.
 
 Upstream builds with SCons. amiga/Makefile.amigaos builds the sources
 SConstruct picks for
 
-    scons d1x=1 d2x=0 opengl=0 sdl2=0 sdlmixer=0 sdlimage=0 use_udp=0
+    scons d1x=1 d2x=1 opengl=0 sdl2=0 sdlmixer=0 sdlimage=0 use_udp=0
           editor=0 host_endian=big screenshot=legacy
 
 with SConstruct's own warning flags, and amiga/dxxsconf.h is the header
@@ -65,7 +86,8 @@ PhysicsFS
 
 PhysicsFS 3.2.0 (release-3.2.0, eb3383b532c5f74bfeb42ec306ba2cf80eed988c,
 zlib licence, amiga/physfs/LICENSE.txt) is built into the program: the
-directory, HOG and ZIP archivers only. amiga/physfs/physfs_platform_amiga.c
+directory, HOG, ZIP and MVL (Descent 2's movie libraries) archivers
+only. amiga/physfs/physfs_platform_amiga.c
 is a dos.library platform layer: AmigaDOS names, in which a trailing "/"
 means the parent drawer, are tidied before they are opened; the base,
 user and pref dirs are all PROGDIR:. Small marked changes in physfs.h,

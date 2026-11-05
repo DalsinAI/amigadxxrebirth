@@ -1,66 +1,58 @@
-```
-                         __________
-__________/ DXX-Rebirth /
-```
+# Descent
 
-## 0. Introduction:
+**DXX-Rebirth, the six-degrees-of-freedom shooter, on the Amiga.**
 
-DXX-Rebirth is based on the late D1X and D2X source ports (which, in turn, were based on the original Descent source and LDescent). The Rebirth Team has spent a lot of time working to improve the source code by fixing old bugs and adding some improvements, while always staying true to our philosophy: Keep it Descent!
+<p align="center">
+  <img src="docs/screenshots/play-1.png" width="640" alt="Descent on the Amiga">
+</p>
 
-It is the goal of DXX-Rebirth to keep Descent 1 & 2 alive and well, updating them for modern PCs while also keeping them the same games you remember playing back in 1995!
+<p align="center">
+  <img src="docs/screenshots/title.png" width="310" alt="Title screen">
+  <img src="docs/screenshots/play-2.png" width="310" alt="In the game">
+</p>
 
-> Now Material Defender...Prepare for Descent!
+<p align="center"><sub>Captured from this build running on AmigaOS.</sub></p>
 
-## 1. Features:
+Fly a Pyro-GX through the mines of the solar system, blast the infected robots and get out before the reactor blows. DXX-Rebirth keeps Parallax's Descent alive, and this is its native Amiga build of Descent 1: the software renderer, the sound effects, the movies and the full game on the 68040.
 
-DXX-Rebirth has every little feature you may remember from the original Descent 1&2 and much more.
+## What you need
 
-For example:
+A 68040 with an FPU, AmigaOS 3.2 or later, AHI, and a 512 KB stack (the icon asks for it). AGA or an RTG card.
 
-* Full compatibility with Descent and Descent 2, including all expansions and third-party levels.
-* DXX-Rebirth runs on your favourite Operating System. We officially support Linux (and other \*NIXs), Mac OS X and Windows. The source code can also be compiled on many other systems!
-* OpenGL provides fast and smooth rendering - even on low-end systems.
-* Optionally you can enable several effects like Transparency, Colored Lighting, Texture Filtering, FSAA, etc.
-* Thanks to SDL, a wide variety of Joysticks are supported. Also you can use more Joysticks, buttons and axes than you can ever operate in your state of evolution.
-* Joystick, Keyboard and Mouse can be used simultaneously.
-* The games can display all resolutions and aspects supported by your monitor, including an option for VSync.
-* Besides MIDI and CD-Audio (Redbook), you can play your own custom Music from your hard drive or a separate AddOn.
-* Both games can utilize special AddOn packs to replace or expand the original game content.
-* Multiplayer via UDP protocol provides a fast and easy-to-use LAN and Online action. This includes reliable communication causing less glitches due to lost packets.
-* The ingame Demo-recording system has been improved. Demos are less glitchy and smaller while still being backwards-compatible to earlier versions of the games.
-* Higher game speed will not cause glitches such as unacceptable fast homing projectiles, incredible high damage caused by several collisions or Fusion cannon, etc.
-* Player files, Savegames, Demos and Missions from DOS-Versions of the games can freely be used in DXX-Rebirth.
-* Mac Command keys are now working - see F1 Help. Command-Q works much like a normal Mac program
-* Even more ...
+No game data comes with this port. Put `descent.hog` and `descent.pig` from Descent 1 (the free shareware 1.4, or the full game 1.4/1.5) in the `Data` drawer.
 
+## Controls
 
-## 2. Installation:
+| Key | Does |
+|---|---|
+| Arrows | Pitch and turn |
+| A / Z | Forward / back |
+| Ctrl | Fire primary |
+| Space | Fire secondary |
+| Esc | Menu |
+| F1 | Help, with every key |
 
-See [INSTALL.markdown](INSTALL.markdown).
+## What works
 
+- Descent 1 in 320x200 (other sizes in Options > Graphics)
+- Sound effects and the movies through AHI
+- Pilots, saved games and demos in the Descent drawer
 
-## 3. Multiplayer:
+## Not in this build yet
 
-DXX-Rebirth supports Multiplayer over UDP/IP.  Using UDP/IP works over LAN and Internet. 
+- Music (HMP/MIDI) and CD audio
+- Network games
+- OpenGL, the level editor, PNG screenshots (they are PCX)
 
-By default, each game communicates over UDP-Port 42424. This can be changed via the menus, command-line argument or .ini files. 
+## Building
 
-Please be aware that if you host a game and players want to join your game online via direct IP connection, your specified game port should be forwarded on your router. 
+The Amiga build, its make file and what was changed for the 68k are described in [AMIGA_PORT.md](AMIGA_PORT.md).
 
-If you host your game on the Online Tracker and other players join via this method, port forwarding should not be necessary.
+## Credits and licence
 
-If you only want to join a game, or host a game on LAN (not online), port forwarding should not be necessary. If you do experience problems, please check your NAT settings and/or Firewall.
+DXX-Rebirth by the DXX-Rebirth Team, from Parallax Software's Descent ([upstream](https://github.com/dxx-rebirth/dxx-rebirth)). Licence: GPL 3 with the Parallax licence: share it freely, never sell it.
 
-
-## 4. Legal stuff:
-
-See [COPYING.txt](COPYING.txt) and [GPL-3.txt](GPL-3.txt)
+Amiga port by The AmiCradle Team.
 
 
-## 5. Contact:
-
-- https://github.com/dxx-rebirth/dxx-rebirth/
-
-## 6. Issue Reporting
-
-Use GitHub issues tab report a [new issue](https://github.com/dxx-rebirth/dxx-rebirth/issues/new), be sure to add as much detail as possible in the template provided.
+The original project's README is [README.upstream.md](README.upstream.md).

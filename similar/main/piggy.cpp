@@ -480,7 +480,12 @@ bitmap_index piggy_find_bitmap(const std::span<const char> entry_name)
 
 int piggy_find_sound(const std::span<const char> name)
 {
-	const auto i = hashtable_search(&AllDigiSndNames, name.data());
+	/* The span may point into a longer string, such as "laser03.raw" from
+	 * bitmaps.tbl, so search with a terminated copy of just the span.
+	 */
+	std::array<char, FILENAME_LEN> key{};
+	std::memcpy(key.data(), name.data(), std::min(key.size() - 1, name.size()));
+	const auto i = hashtable_search(&AllDigiSndNames, key.data());
 	if ( i < 0 )
 		return 255;
 	return i;
@@ -537,7 +542,10 @@ void load_sound_bytes_from_file(const NamedPHYSFS_File fp
 			//Arne's decompress for shareware on all soundcards - Tim@Rikers.org
 			if (pc_shareware)
 			{
-				const auto compressed_length = SoundCompressed[i];
+				/* Each compressed byte decodes to two samples, so never feed
+				 * the decoder more than the sound's buffer can hold.
+				 */
+				const auto compressed_length = std::min<std::size_t>(SoundCompressed[i], snd.length / 2);
 				lastbuf.resize(compressed_length);
 				PHYSFSX_readBytes(Piggy_fp, lastbuf.data(), compressed_length);
 				sound_decompress(lastbuf.data(), compressed_length, snd.data.get());
@@ -697,13 +705,16 @@ properties_init_result properties_init(d_level_shared_robot_info_state &LevelSha
 		for (; !sbuf.empty(); sbuf = sbuf.subspan<sizeof(DiskSoundHeader)>())
 		{
 			const auto sndh{DiskSoundHeader_read(sbuf.first<sizeof(DiskSoundHeader)>())};
-			piggy_register_sound(digi_sound{
+			const auto sound_index{piggy_register_sound(digi_sound{
 				.length{sndh.length},
 				.freq{sound_sample_rate::_11k},
 				.data{digi_sound::allocated_data::build_deferred_borrowed_pointer(game_sound_offset{sndh.offset + header_size + uint32_t{sizeof(int) * 2} + Pigdata_start})}
-				}, std::span(sndh.name).first<8>());
+				}, std::span(sndh.name).first<8>())};
+		/* Store the compressed size under the index this sound was given;
+		 * load_sound_bytes_from_file reads SoundCompressed[i] for sound i.
+		 */
 		if (PCSharePig)
-			SoundCompressed[Num_sound_files] = sndh.data_length;
+			SoundCompressed[sound_index] = sndh.data_length;
                 sbytes += sndh.length;
 	}
 

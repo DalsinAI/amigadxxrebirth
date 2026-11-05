@@ -1,0 +1,34 @@
+Descent 2's game data goes in this drawer
+=========================================
+
+D2X-Rebirth is the engine only. It needs the data files of Descent 2,
+which are not included. Copy one of these sets into this drawer (Data,
+beside the Descent2 program). Names may be in any case. The game also
+finds them in the Descent2 drawer itself.
+
+The full game (1.2, from your own CD or a store copy):
+
+  descent2.hog
+  descent2.ham
+  descent2.pig    (and alien1.pig, alien2.pig, fire.pig, groupa.pig,
+                   ice.pig, water.pig: copy every .pig there is)
+  descent2.s11, descent2.s22   (sounds, if your copy has them)
+
+  The movies, if you want them: intro-l.mvl (or intro-h.mvl),
+  other-l.mvl, robots-l.mvl and the rest of the *.mvl files. Without
+  them the game starts at the title screen.
+
+The demo (Descent 2 shareware/demo 1.0, the first levels):
+
+  d2demo.hog
+  d2demo.ham
+  d2demo.pig
+
+  The demo has no movies, so there is no intro film.
+
+Optional extras go here too: custom missions in a "missions" drawer you
+make here, and demos in "demos".
+
+The game writes its settings (descent.cfg), pilots (*.plr), saved games
+and screenshots in the Descent2 drawer, so that drawer must not be
+write-protected.

@@ -1,7 +1,7 @@
 /*
  * dxxsconf.h for AmigaOS 3.x (68040+FPU) on acsdl12: what SConstruct's
  * tests record (record_sconf_results=1) for
- *   scons d1x=1 d2x=0 opengl=0 sdl2=0 sdlmixer=0 sdlimage=0 use_udp=0
+ *   scons d1x=1 d2x=1 opengl=0 sdl2=0 sdlmixer=0 sdlimage=0 use_udp=0
  *         use_tracker=0 ipv6=0 editor=0 host_endian=big screenshot=legacy
  *         max_joysticks=1 max_axes_per_joystick=4
  *         max_buttons_per_joystick=11 max_hats_per_joystick=1

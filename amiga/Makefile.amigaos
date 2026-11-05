@@ -1,20 +1,23 @@
-# D1X-Rebirth (DXX-Rebirth's Descent 1 engine) for AmigaOS 3.x / AmiCradle,
-# 68040 + FPU, software renderer, on acsdl12.
+# D1X-Rebirth and D2X-Rebirth (DXX-Rebirth's Descent 1 and Descent 2
+# engines) for AmigaOS 3.x / AmiCradle, 68040 + FPU, software renderer, on
+# acsdl12.
 #
-#   make -f amiga/Makefile.amigaos [STOVE=...] [NDK=...] [ACSDL=...]
+#   make -f amiga/Makefile.amigaos [STOVE=...] [NDK=...] [ACSDL=...] [d1x|d2x]
 #
 # STOVE is GFOpenAmigaGCC 16.2.0-open4 or later (C++23); ACSDL is acsdl12,
 # built with its own Makefile.amigaos. Upstream builds with SCons; this
-# Makefile builds the same d1x sources that
+# Makefile builds the same d1x and d2x sources that
 #
-#   scons d1x=1 d2x=0 opengl=0 sdl2=0 sdlmixer=0 sdlimage=0 use_udp=0 \
+#   scons d1x=1 d2x=1 opengl=0 sdl2=0 sdlmixer=0 sdlimage=0 use_udp=0 \
 #         use_tracker=0 ipv6=0 editor=0 host_endian=big screenshot=legacy
 #
 # compiles, with the same flags, and amiga/dxxsconf.h in place of the
 # header SCons's tests write. PhysicsFS 3.2.0 (amiga/physfs, with a
 # dos.library platform layer) is built here as a static library.
-# Output: build/amigaos/Descent/ with the program, the ReadMe, the licences,
-# an empty Data drawer for the game data, and the icons.
+# Output: build/amigaos/Descent/ (Descent 1) and build/amigaos/Descent2/
+# (Descent 2), each with the program, the ReadMe, the licences, an empty
+# Data drawer for the game data, and the icons. "all" builds both; the
+# targets d1x and d2x build one.
 
 STOVE   ?= $(HOME)/CradleLab/toolchain/openamigagcc-16.2.0-open4-x86_64-linux
 NDK     ?= $(HOME)/CradleLab/gfopensdk/OpenNDK/Include_H
@@ -35,6 +38,7 @@ OPT     ?= -O2 -fomit-frame-pointer
 BUILD   = build/amigaos
 OBJDIR  = $(BUILD)/obj
 OUT     = $(BUILD)/Descent
+OUT2    = $(BUILD)/Descent2
 
 # The warnings SConstruct turns on for g++, as it does on every platform.
 DXX_WARN = -Wall -Wformat=2 -Wextra -Wmissing-braces -Wmissing-include-dirs \
@@ -54,14 +58,18 @@ CXXBASE = -noixemul $(OPT) $(CPU) -std=gnu++23 -ftabstop=4 -funsigned-char \
 CXXFLAGS = $(CXXBASE) -include amiga/amiga_prefix.h -MMD -MP
 D1XBASE  = -DDXX_BUILD_DESCENT=1 -D__STDC_FORMAT_MACROS -Id1x-rebirth/main
 D1XFLAGS = $(D1XBASE)
+D2XBASE  = -DDXX_BUILD_DESCENT=2 -D__STDC_FORMAT_MACROS -Id2x-rebirth/main
+D2XFLAGS = $(D2XBASE)
 LDFLAGS = -noixemul $(CPU)
 
-# PhysicsFS: the directory, HOG and ZIP archivers are all Descent uses.
+# PhysicsFS: the directory, HOG and ZIP archivers, and MVL for Descent 2's
+# movies.
 PHYSFS_SRC = $(wildcard amiga/physfs/*.c)
 PHYSFS_OBJ = $(PHYSFS_SRC:amiga/physfs/%.c=$(OBJDIR)/physfs/%.o)
 PHYSFS_LIB = $(BUILD)/libphysfs.a
 PHYSFS_CFLAGS = -noixemul -O2 $(CPU) -std=gnu99 -Wall -DNDEBUG \
 	-DPHYSFS_SUPPORTS_DEFAULT=0 -DPHYSFS_SUPPORTS_HOG=1 -DPHYSFS_SUPPORTS_ZIP=1 \
+	-DPHYSFS_SUPPORTS_MVL=1 \
 	-I$(NDK)
 
 # The sources SConstruct builds for this profile (common/ once for both
@@ -129,10 +137,22 @@ D1X_SRC = \
 	similar/main/weapon.cpp similar/misc/args.cpp \
 	similar/misc/physfsx.cpp amiga/multi_none.cpp
 
+# The sources SConstruct builds with DXX_BUILD_DESCENT=2: the shared
+# similar/ ones (bmread.cpp is the editor's in Descent 2) and Descent 2's
+# own.
+D2X_SRC = \
+	d2x-rebirth/libmve/decoder16.cpp d2x-rebirth/libmve/decoder8.cpp \
+	d2x-rebirth/libmve/mve_audio.cpp d2x-rebirth/libmve/mvelib.cpp \
+	d2x-rebirth/libmve/mveplay.cpp d2x-rebirth/main/escort.cpp \
+	d2x-rebirth/main/gamepal.cpp d2x-rebirth/main/movie.cpp \
+	$(filter similar/% amiga/%,$(filter-out similar/main/bmread.cpp,$(D1X_SRC)))
+
 COMMON_OBJ = $(COMMON_SRC:%.cpp=$(OBJDIR)/%.o)
 D1X_OBJ    = $(D1X_SRC:%.cpp=$(OBJDIR)/d1x/%.o)
+D2X_OBJ    = $(D2X_SRC:%.cpp=$(OBJDIR)/d2x/%.o)
 AMIGA_OBJ  = $(OBJDIR)/amiga/stack.o $(OBJDIR)/amiga/pthread_stubs.o
 OBJS       = $(COMMON_OBJ) $(D1X_OBJ) $(AMIGA_OBJ)
+OBJS2      = $(COMMON_OBJ) $(D2X_OBJ) $(AMIGA_OBJ)
 
 # What SConstruct passes to the few files that report the version.
 GIT_COMMIT  := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
@@ -141,7 +161,7 @@ VERSION_EXTRA ?= Amiga
 chars = $(shell printf '%s' '$(1)' | od -An -tu1 | tr -s ' \n' ',,' | sed 's/^,//;s/,$$//')
 CXX_VERSION := $(shell $(CXX) --version 2>/dev/null | head -n 1)
 # vers_id.cpp records how the program was built; demos carry it (newdemo.cpp).
-$(OBJDIR)/d1x/similar/main/vers_id.o: D1XFLAGS += \
+VERS_ID_FLAGS = \
 	-DDESCENT_VERSION_EXTRA=$(call chars,$(VERSION_EXTRA)) \
 	-DDESCENT_CXX=$(call chars,CXX=m68k-amigaos-g++) \
 	-DDESCENT_CXX_version=$(call chars,CXX_version=$(CXX_VERSION)) \
@@ -151,8 +171,12 @@ $(OBJDIR)/d1x/similar/main/vers_id.o: D1XFLAGS += \
 	-DDESCENT_git_status=$(call chars,git_status=$(GIT_COMMIT)) \
 	-DDESCENT_git_diffstat=$(call chars,git_diffstat=) \
 	'-DDXX_RBE(A)=A(CXX)A(CPPFLAGS)A(CXXFLAGS)A(LINKFLAGS)A(CXX_version)A(git_status)A(git_diffstat)'
+$(OBJDIR)/d1x/similar/main/vers_id.o: D1XFLAGS += $(VERS_ID_FLAGS)
+$(OBJDIR)/d2x/similar/main/vers_id.o: D2XFLAGS += $(VERS_ID_FLAGS)
 $(OBJDIR)/d1x/similar/main/inferno.o: D1XFLAGS += -DDXX_git_commit=$(GIT_COMMIT) -DDXX_git_describe=amiga
+$(OBJDIR)/d2x/similar/main/inferno.o: D2XFLAGS += -DDXX_git_commit=$(GIT_COMMIT) -DDXX_git_describe=amiga
 $(OBJDIR)/d1x/similar/main/playsave.o: D1XFLAGS += -DDXX_VERSION_SEQ=0,61,0
+$(OBJDIR)/d2x/similar/main/playsave.o: D2XFLAGS += -DDXX_VERSION_SEQ=0,61,0
 
 # kconfig.cpp includes a table of which control is up, down, left and
 # right of which, made by a script from the preprocessed ui-table
@@ -168,12 +192,28 @@ $(KCONFIG_UDLR): $(KCONFIG_I) similar/main/generate-kconfig-udlr.py
 	$(PYTHON) similar/main/generate-kconfig-udlr.py $< $@
 $(OBJDIR)/d1x/similar/main/kconfig.o: $(KCONFIG_UDLR)
 $(OBJDIR)/d1x/similar/main/kconfig.o: D1XFLAGS += -include $(KCONFIG_UDLR)
+# The same for Descent 2, whose table has its own controls.
+KCONFIG2_I    = $(OBJDIR)/d2x/kconfig.ui-table.i
+KCONFIG2_UDLR = $(OBJDIR)/d2x/kconfig.udlr.h
+$(KCONFIG2_I): similar/main/kconfig.ui-table.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) -E $(CXXBASE) $(D2XBASE) -DDXX_KCONFIG_UI_ENUM=DXX_KCONFIG_UI_ENUM \
+		-DDXX_KCONFIG_UI_LABEL=DXX_KCONFIG_UI_LABEL -Dkc_item=kc_item -o $@ $<
+$(KCONFIG2_UDLR): $(KCONFIG2_I) similar/main/generate-kconfig-udlr.py
+	$(PYTHON) similar/main/generate-kconfig-udlr.py $< $@
+$(OBJDIR)/d2x/similar/main/kconfig.o: $(KCONFIG2_UDLR)
+$(OBJDIR)/d2x/similar/main/kconfig.o: D2XFLAGS += -include $(KCONFIG2_UDLR)
 
 ICONS   = amiga/icons/Descent-drawer.info amiga/icons/Descent.info \
 	amiga/icons/ReadMe.info amiga/icons/COPYING.info amiga/icons/Data.info
 DRAWER_ICON = amiga/icons/Descent-drawer.info
+ICONS2  = amiga/icons-d2x/Descent2-drawer.info amiga/icons-d2x/Descent2.info \
+	amiga/icons-d2x/ReadMe.info amiga/icons-d2x/COPYING.info \
+	amiga/icons-d2x/Data.info
 
-all: $(OUT)/Descent $(OUT)/ReadMe
+all: d1x d2x
+d1x: $(OUT)/Descent $(OUT)/ReadMe
+d2x: $(OUT2)/Descent2 $(OUT2)/ReadMe
 
 $(OUT)/Descent: $(OBJS) $(PHYSFS_LIB) | $(OUT)
 	$(CXX) $(LDFLAGS) -o $@ $(OBJS) $(PHYSFS_LIB) $(ACSDL)/build/amigaos/libacsdl12.a -lm
@@ -192,6 +232,23 @@ $(OUT)/ReadMe: AMIGA_PORT.md amiga/Data-ReadMe COPYING.txt GPL-3.txt amiga/physf
 	cp amiga/icons/ReadMe.info $(OUT)/Data/ReadMe.info
 	cp $(DRAWER_ICON) $(BUILD)/Descent.info
 
+$(OUT2)/Descent2: $(OBJS2) $(PHYSFS_LIB) | $(OUT2)
+	$(CXX) $(LDFLAGS) -o $@ $(OBJS2) $(PHYSFS_LIB) $(ACSDL)/build/amigaos/libacsdl12.a -lm
+
+# Descent 2's drawer: the same ReadMe and licences, its own Data ReadMe
+# and icons.
+$(OUT2)/ReadMe: AMIGA_PORT.md amiga/Data-ReadMe-D2 COPYING.txt GPL-3.txt amiga/physfs/LICENSE.txt $(ICONS2) | $(OUT2)
+	cp AMIGA_PORT.md $(OUT2)/ReadMe
+	( cat COPYING.txt; echo; echo; cat GPL-3.txt; echo; echo; \
+	  echo "PhysicsFS (amiga/physfs), linked into the program:"; echo; \
+	  cat amiga/physfs/LICENSE.txt ) > $(OUT2)/COPYING
+	mkdir -p $(OUT2)/Data
+	cp amiga/Data-ReadMe-D2 $(OUT2)/Data/ReadMe
+	cp amiga/icons-d2x/Descent2.info amiga/icons-d2x/ReadMe.info \
+	   amiga/icons-d2x/COPYING.info amiga/icons-d2x/Data.info $(OUT2)/
+	cp amiga/icons-d2x/ReadMe.info $(OUT2)/Data/ReadMe.info
+	cp amiga/icons-d2x/Descent2-drawer.info $(BUILD)/Descent2.info
+
 $(PHYSFS_LIB): $(PHYSFS_OBJ)
 	rm -f $@
 	$(AR) rcs $@ $^
@@ -208,6 +265,10 @@ $(OBJDIR)/d1x/%.o: %.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(D1XFLAGS) -c -o $@ $<
 
+$(OBJDIR)/d2x/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(D2XFLAGS) -c -o $@ $<
+
 # pthread_stubs.c: libstdc++ and libgcc's unwinder ask for POSIX threads;
 # the game has one. Its loose signatures are not checked against a header.
 $(OBJDIR)/amiga/pthread_stubs.o: amiga/pthread_stubs.c
@@ -218,17 +279,18 @@ $(OBJDIR)/amiga/%.o: amiga/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -noixemul -O2 $(CPU) -std=gnu99 -Wall -Wextra -c -o $@ $<
 
-$(OUT):
+$(OUT) $(OUT2):
 	mkdir -p $@
 
--include $(COMMON_OBJ:.o=.d) $(D1X_OBJ:.o=.d)
+-include $(COMMON_OBJ:.o=.d) $(D1X_OBJ:.o=.d) $(D2X_OBJ:.o=.d)
 
 
 clean:
-	rm -rf $(OBJDIR) $(PHYSFS_LIB) $(OUT) $(BUILD)/Descent.info
+	rm -rf $(OBJDIR) $(PHYSFS_LIB) $(OUT) $(BUILD)/Descent.info \
+	  $(OUT2) $(BUILD)/Descent2.info
 
-.PHONY: all clean
+.PHONY: all d1x d2x clean
 
 # Every object, without linking.
-objs: $(OBJS) $(PHYSFS_LIB)
+objs: $(OBJS) $(D2X_OBJ) $(PHYSFS_LIB)
 .PHONY: objs
