@@ -199,7 +199,12 @@ void reset_palette_add()
 	PaletteBlueAdd		= 0;
 }
 
+#ifdef __amigaos__
+/* A 68040 draws 320x200 at a playable rate. */
+constexpr screen_mode initial_large_game_screen_mode{320, 200};
+#else
 constexpr screen_mode initial_large_game_screen_mode{1024, 768};
+#endif
 screen_mode Game_screen_mode = initial_large_game_screen_mode;
 
 #if DXX_USE_STEREOSCOPIC_RENDER

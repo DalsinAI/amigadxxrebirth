@@ -160,7 +160,11 @@ static void InitGameArg()
 #endif
 #endif
 	CGameArg.DbgVerbose = CON_NORMAL;
+#ifdef __amigaos__
+	CGameArg.DbgBpp = 8;	// acsdl12 opens 8-bit screens only
+#else
 	CGameArg.DbgBpp = 32;
+#endif
 #if DXX_USE_OGL
 	CGameArg.OglSyncMethod = OGL_SYNC_METHOD_DEFAULT;
 	CGameArg.OglSyncWait = OGL_SYNC_WAIT_DEFAULT;

@@ -142,6 +142,7 @@ static int load_pig1(const NamedPHYSFS_File f, unsigned num_bitmaps, unsigned nu
 	{
 		if (PHYSFSX_readBytes(f, &bmh, sizeof(DiskBitmapHeader)) != sizeof(DiskBitmapHeader))
 			return -1;
+		bmh.offset = INTEL_INT(bmh.offset);	// little-endian in the file
 
 		snprintf(name, sizeof(name), "%.8s%c%d", bmh.name, (bmh.dflags & DBM_FLAG_ABM) ? '#' : 0, bmh.dflags & 63);
 
@@ -159,6 +160,9 @@ static int load_pig1(const NamedPHYSFS_File f, unsigned num_bitmaps, unsigned nu
 	{
 		if (PHYSFSX_readBytes(f, &sndh, sizeof(DiskSoundHeader)) != sizeof(DiskSoundHeader))
 			return -1;
+		sndh.length = INTEL_INT(sndh.length);	// little-endian in the file
+		sndh.data_length = INTEL_INT(sndh.data_length);
+		sndh.offset = INTEL_INT(sndh.offset);
 
 		memcpy(name, sndh.name, 8);
 		name[8] = 0;
@@ -234,6 +238,7 @@ static int load_pog(const NamedPHYSFS_File f, int pog_sig, int pog_ver, unsigned
 	{
 		if (PHYSFSX_readBytes(f, &bmh, sizeof(DiskBitmapHeader2)) != sizeof(DiskBitmapHeader2))
 			return -1;
+		bmh.offset = INTEL_INT(bmh.offset);	// little-endian in the file
 
 		cip->offset = bmh.offset + data_ofs;
 		cip->flags = bmh.flags & (BM_FLAG_TRANSPARENT | BM_FLAG_SUPER_TRANSPARENT | BM_FLAG_NO_LIGHTING | BM_FLAG_RLE);

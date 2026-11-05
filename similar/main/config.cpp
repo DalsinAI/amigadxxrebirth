@@ -279,8 +279,13 @@ void ReadConfigFile(CCfg &CGameCfg, Cfg &GameCfg)
 	CGameCfg.GammaLevel = 0;
 	GameCfg.LastPlayer = {};
 	CGameCfg.LastMission = "";
+#ifdef __amigaos__
+	CGameCfg.ResolutionX = 320;
+	CGameCfg.ResolutionY = 200;
+#else
 	CGameCfg.ResolutionX = 1024;
 	CGameCfg.ResolutionY = 768;
+#endif
 	CGameCfg.AspectX = 3;
 	CGameCfg.AspectY = 4;
 	CGameCfg.WindowMode = false;

@@ -1116,7 +1116,7 @@ window_event_result multi_do_frame()
 namespace {
 
 template <multiplayer_command_t C>
-#ifndef __clang__
+#if !defined(__clang__) && DXX_USE_UDP
 /* udp::dispatch_table::send_data_direct copies `buf` into a buffer sized from
  * `UDP_mdata_info`.  Require that no overflow will occur.
  *
@@ -1346,7 +1346,11 @@ namespace {
 
 static void kick_player(const player &plr, netplayer_info &nplr)
 {
+#if DXX_USE_UDP
 	multi::dispatch->kick_player(nplr.protocol.udp.addr, kick_player_reason::kicked);
+#else
+	(void)nplr;
+#endif
 	HUD_init_message(HM_MULTI, "Dumping %s...", static_cast<const char *>(plr.callsign));
 	multi_message_index = 0;
 	multi_sending_message[Player_num] = msgsend_state::none;

@@ -80,6 +80,7 @@ hmp_open_result hmp_open(const char *const filename)
 	if (PHYSFSX_readBytes(fp, &num_tracks, 4) != 4)
 		return physfs_error(hmp_open_error::physfs_read_tracks);
 
+	num_tracks = INTEL_INT(num_tracks);	// little-endian in the file
 	if ((num_tracks < 1) || (num_tracks > HMP_TRACKS))
 		return data_error(hmp_open_error::track_count);
 	std::unique_ptr<hmp_file> hmp(new hmp_file{});
@@ -103,8 +104,12 @@ hmp_open_result hmp_open(const char *const filename)
 		if (constexpr std::size_t buffer_size{std::size(tdata) * sizeof(tdata[0])}; PHYSFSX_readBytes(fp, std::data(tdata), buffer_size) != buffer_size)
 			return physfs_error(hmp_open_error::physfs_read_track_length);
 
-		int data{tdata[1]};
+		/* The track length is little-endian in the file; unswapped on a
+		 * big-endian machine it is a huge or negative size. */
+		int data{INTEL_INT(tdata[1])};
 		data -= 12;
+		if (data < 0)
+			return data_error(hmp_open_error::track_count);
 		i.len = data;
 		i.data = std::make_unique<uint8_t[]>(data);
 		/* finally, read track data */
