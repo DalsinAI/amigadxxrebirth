@@ -28,15 +28,25 @@ cd "$ROOT"
 ACSDL12=1
 . "$HERE/acgame-deps.sh"
 
-make -f amiga/Makefile.amigaos STOVE="$STOVE" NDK="$NDK" ACGAME="$ACGAME" ACGAMELIB="$ACGAMELIB" ACSDL="$ACSDL" ACSDLLIB="$ACSDLLIB" -j4 > "$OUT/build-output.txt" 2>&1 || { tail -n 60 "$OUT/build-output.txt"; exit 1; }
+# GAMES picks which: both by default; package/descent and package/descent2
+# build one each, as one build of both takes longer than a stove_build may.
+GAMES=${GAMES:-"Descent Descent2"}
+TARGETS=
+for drawer in $GAMES; do
+	case $drawer in
+	Descent) TARGETS="$TARGETS d1x" ;;
+	Descent2) TARGETS="$TARGETS d2x" ;;
+	*) echo "GAMES: no game $drawer" >&2; exit 1 ;;
+	esac
+done
+make -f amiga/Makefile.amigaos STOVE="$STOVE" NDK="$NDK" ACGAME="$ACGAME" ACGAMELIB="$ACGAMELIB" ACSDL="$ACSDL" ACSDLLIB="$ACSDLLIB" -j4 $TARGETS > "$OUT/build-output.txt" 2>&1 || { tail -n 60 "$OUT/build-output.txt"; exit 1; }
 
 # For each game: the program, checked by its SHA-256, the rest of the
 # drawer as a tar, and what the ReadMe and the check name (the program's
 # SHA-256, the commit, the compiler, the commit's date for the archive's
 # dates, and the acgame.library it ships).
-for game in Descent:descent Descent2:descent2; do
-	drawer=${game%%:*}
-	spec=${game#*:}
+for drawer in $GAMES; do
+	spec=$(echo "$drawer" | tr A-Z a-z)
 	B="$BUILD/$drawer"
 	mkdir -p "$B"
 	cp "build/amigaos/$drawer/$drawer" "$B/$drawer"
