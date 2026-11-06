@@ -10,6 +10,18 @@ Team's SDL 1.2. Each game has its own drawer.
 Upstream: https://github.com/dxx-rebirth/dxx-rebirth, revision
 6943b924bea749543ef5729f31a28345e79716d2 (master of 2026-10-11).
 
+Installing
+----------
+
+Each game comes in its own archive (descent-...lha, descent2-...lha).
+Unpack it anywhere (on AmiCradle: SYS:Utilities/OpenCompress x
+descent-...lha RAM:), then double-click Install-Descent (Install-Descent2)
+beside the drawer: it asks where to put the game (Work:Games by default)
+and keeps the Data drawer of an earlier install, game data and all.
+Pilots, saved games and settings are not in the archive, so an update
+leaves them as they are. Each drawer's Libs holds the acgame.library the
+game was built against, and the game opens that copy first.
+
 Running it
 ----------
 
@@ -65,8 +77,12 @@ Building
     make -f amiga/Makefile.amigaos -j2 d2x      # Descent2 only
 
 The defaults find GFOpenAmigaGCC 16.2.0-open4 (STOVE), the NDK, acsdl12
-and ACGame under $HOME/CradleLab; override STOVE=, NDK=, ACSDL=, ACGAME=
-as needed. The output is build/amigaos/Descent/ with Descent.info beside
+and ACGame under $HOME/CradleLab; override STOVE=, NDK=, ACSDL=,
+ACSDLLIB=, ACGAME=, ACGAMELIB= as needed. acsdl12 is built without its own
+ACGame (ACG=), and the games link acgame.library's stubs (libacgame.a).
+package/build-amiga.sh (STOVE and OUT set) makes both release archives
+with their installers; it fetches and builds acgame, acsdl12 and zlib at
+pinned commits. The output is build/amigaos/Descent/ with Descent.info beside
 it, and build/amigaos/Descent2/ with Descent2.info. Each C++ file needs several hundred MB to compile; on a small machine
 use -j1 or -j2.
 

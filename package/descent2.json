@@ -1,0 +1,62 @@
+{
+  "drawer": "Descent2",
+  "drawer_icon": "amiga/icons-d2x/Descent2-drawer.info",
+  "archive": "descent2-{version}-68040",
+  "members": [
+    {
+      "name": "Descent2",
+      "build": "Descent2",
+      "check": "executable_sha256"
+    },
+    {
+      "name": "Libs/acgame.library",
+      "build": "acgame.library",
+      "check": "acgame_library_sha256"
+    },
+    {
+      "name": "",
+      "tar": "drawer.tar"
+    }
+  ],
+  "aminet": [
+    [
+      "Short",
+      "Descent 2 (D2X-Rebirth), 68040+FPU"
+    ],
+    [
+      "Author",
+      "Parallax Software; DXX-Rebirth team; Amiga port: AmiCradle Team"
+    ],
+    [
+      "Uploader",
+      "AmiCradle Team"
+    ],
+    [
+      "Type",
+      "game/shoot"
+    ],
+    [
+      "Version",
+      "{version}"
+    ],
+    [
+      "Requires",
+      "AmigaOS 3.x, 68040/68060 with FPU, AGA or RTG, AHI, game data"
+    ],
+    [
+      "Architecture",
+      "m68k-amigaos >= 3.0"
+    ]
+  ],
+  "root": [
+    {
+      "name": "Install-Descent2",
+      "repo": "package/installer/Install-Descent2",
+      "installer": true
+    },
+    {
+      "name": "Install-Descent2.info",
+      "repo": "package/installer/Install-Descent2.info"
+    }
+  ]
+}

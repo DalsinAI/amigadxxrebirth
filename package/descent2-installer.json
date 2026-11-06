@@ -1,0 +1,15 @@
+{
+  "name": "Descent 2",
+  "version": "0.61.0-amiga2",
+  "drawer": "Descent2",
+  "program": "Descent2",
+  "cpu": "68040",
+  "fpu": true,
+  "space": 12000000,
+  "modules": [],
+  "keep": [
+    "Data"
+  ],
+  "parent": "Work:Games",
+  "badge": "../amiga/icons-d2x/art/d2x-rebirth.png"
+}

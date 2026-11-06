@@ -2,7 +2,8 @@
 # engines) for AmigaOS 3.x / AmiCradle, 68040 + FPU, software renderer, on
 # acsdl12.
 #
-#   make -f amiga/Makefile.amigaos [STOVE=...] [NDK=...] [ACSDL=...] [d1x|d2x]
+#   make -f amiga/Makefile.amigaos [STOVE=...] [NDK=...] [ACSDL=...] \
+#        [ACSDLLIB=...] [ACGAME=...] [ACGAMELIB=...] [d1x|d2x]
 #
 # STOVE is GFOpenAmigaGCC 16.2.0-open4 or later (C++23); ACSDL is acsdl12,
 # built with its own Makefile.amigaos. Upstream builds with SCons; this
@@ -14,6 +15,9 @@
 # compiles, with the same flags, and amiga/dxxsconf.h in place of the
 # header SCons's tests write. PhysicsFS 3.2.0 (amiga/physfs, with a
 # dos.library platform layer) is built here as a static library.
+# acsdl12 is built with ACG= into ACSDLLIB, without its own copy of ACGame:
+# the games get ACGame from acgame.library, through ACGAMELIB's libacgame.a
+# (DalsinAI/acgame's stubs). package/acgame-deps.sh builds both.
 # Output: build/amigaos/Descent/ (Descent 1) and build/amigaos/Descent2/
 # (Descent 2), each with the program, the ReadMe, the licences, an empty
 # Data drawer for the game data, and the icons. "all" builds both; the
@@ -22,7 +26,9 @@
 STOVE   ?= $(HOME)/CradleLab/toolchain/openamigagcc-16.2.0-open4-x86_64-linux
 NDK     ?= $(HOME)/CradleLab/gfopensdk/OpenNDK/Include_H
 ACSDL   ?= $(HOME)/CradleLab/guest-sdl/gameports/acsdl12
+ACSDLLIB ?= $(ACSDL)/build/amigaos
 ACGAME  ?= $(ACSDL)/../acgame
+ACGAMELIB ?= $(ACGAME)/build-amiga
 # PhysicsFS needs no zlib (its zip reader has its own inflate); ZLIB is
 # here for acsdl12's build and is not used by this one.
 ZLIB    ?= $(HOME)/CradleLab/zlib-1.3.1
@@ -216,7 +222,7 @@ d1x: $(OUT)/Descent $(OUT)/ReadMe
 d2x: $(OUT2)/Descent2 $(OUT2)/ReadMe
 
 $(OUT)/Descent: $(OBJS) $(PHYSFS_LIB) | $(OUT)
-	$(CXX) $(LDFLAGS) -o $@ $(OBJS) $(PHYSFS_LIB) $(ACSDL)/build/amigaos/libacsdl12.a -lm
+	$(CXX) $(LDFLAGS) -o $@ $(OBJS) $(PHYSFS_LIB) $(ACSDLLIB)/libacsdl12.a $(ACGAMELIB)/libacgame.a -lm
 
 # The ReadMe, the licences in one COPYING, an empty Data drawer with its
 # own ReadMe, and the icons; Descent.info goes beside the drawer.
@@ -233,7 +239,7 @@ $(OUT)/ReadMe: AMIGA_PORT.md amiga/Data-ReadMe COPYING.txt GPL-3.txt amiga/physf
 	cp $(DRAWER_ICON) $(BUILD)/Descent.info
 
 $(OUT2)/Descent2: $(OBJS2) $(PHYSFS_LIB) | $(OUT2)
-	$(CXX) $(LDFLAGS) -o $@ $(OBJS2) $(PHYSFS_LIB) $(ACSDL)/build/amigaos/libacsdl12.a -lm
+	$(CXX) $(LDFLAGS) -o $@ $(OBJS2) $(PHYSFS_LIB) $(ACSDLLIB)/libacsdl12.a $(ACGAMELIB)/libacgame.a -lm
 
 # Descent 2's drawer: the same ReadMe and licences, its own Data ReadMe
 # and icons.
