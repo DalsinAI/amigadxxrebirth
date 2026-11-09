@@ -1,10 +1,10 @@
 {
-  "about": "The Workbench icons of the Descent2 drawer: python3 AMICRADLE/scripts/port_icons.py amiga/icons-d2x/icons.json --out amiga/icons-d2x (DalsinAI/amicradle). The art is D2X-Rebirth's own program icon (d2x-rebirth/d2x-rebirth.png). Descent2-drawer.info is the drawer's own icon, Descent2.info beside the drawer; it has its own name here so as not to meet the program's Descent2.info.",
+  "about": "The Workbench icons of the Descent2 drawer: python3 AMICRADLE/scripts/port_icons.py amiga/icons-d2x/icons.json --out amiga/icons-d2x (DalsinAI/amicradle). The art (art/dxxrebirth.svg, drawn as an OS 3.5 GlowIcon: shaped, shaded, see-through round the edges) is The AmiCradle Team's own, under the same terms as the other Amiga files; art/dxxrebirth.png is it rendered at 128 x 128. Descent2-drawer.info is the drawer's own icon, Descent2.info beside the drawer; it has its own name here so as not to meet the program's Descent2.info.",
   "drawer": {
     "name": "Descent2",
     "file": "Descent2-drawer.info"
   },
-  "badge": "art/d2x-rebirth.png",
+  "badge": "art/dxxrebirth.png",
   "icons": [
     {
       "file": "Descent2.info",
