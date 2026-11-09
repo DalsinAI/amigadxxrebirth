@@ -13,8 +13,11 @@
 #         use_tracker=0 ipv6=0 editor=0 host_endian=big screenshot=legacy
 #
 # compiles, with the same flags, and amiga/dxxsconf.h in place of the
-# header SCons's tests write. PhysicsFS 3.2.0 (amiga/physfs, with a
-# dos.library platform layer) is built here as a static library.
+# header SCons's tests write. PhysicsFS 3.2.0 is LIBS:physfs.library
+# (DalsinAI/gfopenphysfs), shared with every port: PHYSFSKIT is its SDK
+# (gfopenphysfs build-amiga.sh's OUT/sdk, or the Open SDK), with
+# include/physfs.h and lib/libphysfs_auto.a, which opens the library
+# before main().
 # acsdl12 is built with ACG= into ACSDLLIB, without its own copy of ACGame:
 # the games get ACGame from acgame.library, through ACGAMELIB's libacgame.a
 # (DalsinAI/acgame's stubs). package/acgame-deps.sh builds both.
@@ -29,8 +32,10 @@ ACSDL   ?= $(HOME)/CradleLab/guest-sdl/gameports/acsdl12
 ACSDLLIB ?= $(ACSDL)/build/amigaos
 ACGAME  ?= $(ACSDL)/../acgame
 ACGAMELIB ?= $(ACGAME)/build-amiga
-# PhysicsFS needs no zlib (its zip reader has its own inflate); ZLIB is
-# here for acsdl12's build and is not used by this one.
+PHYSFSKIT ?= $(HOME)/CradleLab/gfopenphysfs/build/os3/sdk
+PHYSFS_INC ?= $(PHYSFSKIT)/include
+PHYSFS_LIB ?= $(PHYSFSKIT)/lib
+# ZLIB is here for acsdl12's build and is not used by this one.
 ZLIB    ?= $(HOME)/CradleLab/zlib-1.3.1
 CXX     = $(STOVE)/bin/m68k-amigaos-g++
 CC      = $(STOVE)/bin/m68k-amigaos-gcc
@@ -54,7 +59,9 @@ DXX_WARN = -Wall -Wformat=2 -Wextra -Wmissing-braces -Wmissing-include-dirs \
 	-Wsuggest-attribute=noreturn -Wsuggest-final-types -Wsuggest-override \
 	-Wlogical-op -Wold-style-cast -Wredundant-decls -Wno-sign-compare
 
-INCS    = -Iamiga -Icommon/include -Icommon/main -I. -Iamiga/physfs \
+# physfs.library's header with -isystem: its inline calls are the
+# library's code, not the game's, and stay out of DXX_WARN.
+INCS    = -Iamiga -Icommon/include -Icommon/main -I. -isystem $(PHYSFS_INC) \
 	-I$(ACSDL)/include/SDL -I$(ACSDL)/include -I$(ACGAME)/include -I$(NDK)
 # DXX_USE_SHAREPATH=0: no system-wide data directory; the game finds its
 # data in PROGDIR:Data/ (and PROGDIR:), and writes there too.
@@ -68,15 +75,9 @@ D2XBASE  = -DDXX_BUILD_DESCENT=2 -D__STDC_FORMAT_MACROS -Id2x-rebirth/main
 D2XFLAGS = $(D2XBASE)
 LDFLAGS = -noixemul $(CPU)
 
-# PhysicsFS: the directory, HOG and ZIP archivers, and MVL for Descent 2's
-# movies.
-PHYSFS_SRC = $(wildcard amiga/physfs/*.c)
-PHYSFS_OBJ = $(PHYSFS_SRC:amiga/physfs/%.c=$(OBJDIR)/physfs/%.o)
-PHYSFS_LIB = $(BUILD)/libphysfs.a
-PHYSFS_CFLAGS = -noixemul -O2 $(CPU) -std=gnu99 -Wall -DNDEBUG \
-	-DPHYSFS_SUPPORTS_DEFAULT=0 -DPHYSFS_SUPPORTS_HOG=1 -DPHYSFS_SUPPORTS_ZIP=1 \
-	-DPHYSFS_SUPPORTS_MVL=1 \
-	-I$(NDK)
+# physfs.library has every PhysicsFS archiver, HOG, ZIP and MVL (Descent 2's
+# movies) among them; zip members that are deflated need LIBS:z.library.
+PHYSFS_LINK = -L$(PHYSFS_LIB) -lphysfs_auto
 
 # The sources SConstruct builds for this profile (common/ once for both
 # games, the rest with DXX_BUILD_DESCENT=1).
@@ -221,16 +222,14 @@ all: d1x d2x
 d1x: $(OUT)/Descent $(OUT)/ReadMe
 d2x: $(OUT2)/Descent2 $(OUT2)/ReadMe
 
-$(OUT)/Descent: $(OBJS) $(PHYSFS_LIB) | $(OUT)
-	$(CXX) $(LDFLAGS) -o $@ $(OBJS) $(PHYSFS_LIB) $(ACSDLLIB)/libacsdl12.a $(ACGAMELIB)/libacgame.a -lm
+$(OUT)/Descent: $(OBJS) | $(OUT)
+	$(CXX) $(LDFLAGS) -o $@ $(OBJS) $(PHYSFS_LINK) $(ACSDLLIB)/libacsdl12.a $(ACGAMELIB)/libacgame.a -lm
 
 # The ReadMe, the licences in one COPYING, an empty Data drawer with its
 # own ReadMe, and the icons; Descent.info goes beside the drawer.
-$(OUT)/ReadMe: AMIGA_PORT.md amiga/Data-ReadMe COPYING.txt GPL-3.txt amiga/physfs/LICENSE.txt $(ICONS) | $(OUT)
+$(OUT)/ReadMe: AMIGA_PORT.md amiga/Data-ReadMe COPYING.txt GPL-3.txt $(ICONS) | $(OUT)
 	cp AMIGA_PORT.md $(OUT)/ReadMe
-	( cat COPYING.txt; echo; echo; cat GPL-3.txt; echo; echo; \
-	  echo "PhysicsFS (amiga/physfs), linked into the program:"; echo; \
-	  cat amiga/physfs/LICENSE.txt ) > $(OUT)/COPYING
+	( cat COPYING.txt; echo; echo; cat GPL-3.txt ) > $(OUT)/COPYING
 	mkdir -p $(OUT)/Data
 	cp amiga/Data-ReadMe $(OUT)/Data/ReadMe
 	cp amiga/icons/Descent.info amiga/icons/ReadMe.info amiga/icons/COPYING.info \
@@ -238,30 +237,20 @@ $(OUT)/ReadMe: AMIGA_PORT.md amiga/Data-ReadMe COPYING.txt GPL-3.txt amiga/physf
 	cp amiga/icons/ReadMe.info $(OUT)/Data/ReadMe.info
 	cp $(DRAWER_ICON) $(BUILD)/Descent.info
 
-$(OUT2)/Descent2: $(OBJS2) $(PHYSFS_LIB) | $(OUT2)
-	$(CXX) $(LDFLAGS) -o $@ $(OBJS2) $(PHYSFS_LIB) $(ACSDLLIB)/libacsdl12.a $(ACGAMELIB)/libacgame.a -lm
+$(OUT2)/Descent2: $(OBJS2) | $(OUT2)
+	$(CXX) $(LDFLAGS) -o $@ $(OBJS2) $(PHYSFS_LINK) $(ACSDLLIB)/libacsdl12.a $(ACGAMELIB)/libacgame.a -lm
 
 # Descent 2's drawer: the same ReadMe and licences, its own Data ReadMe
 # and icons.
-$(OUT2)/ReadMe: AMIGA_PORT.md amiga/Data-ReadMe-D2 COPYING.txt GPL-3.txt amiga/physfs/LICENSE.txt $(ICONS2) | $(OUT2)
+$(OUT2)/ReadMe: AMIGA_PORT.md amiga/Data-ReadMe-D2 COPYING.txt GPL-3.txt $(ICONS2) | $(OUT2)
 	cp AMIGA_PORT.md $(OUT2)/ReadMe
-	( cat COPYING.txt; echo; echo; cat GPL-3.txt; echo; echo; \
-	  echo "PhysicsFS (amiga/physfs), linked into the program:"; echo; \
-	  cat amiga/physfs/LICENSE.txt ) > $(OUT2)/COPYING
+	( cat COPYING.txt; echo; echo; cat GPL-3.txt ) > $(OUT2)/COPYING
 	mkdir -p $(OUT2)/Data
 	cp amiga/Data-ReadMe-D2 $(OUT2)/Data/ReadMe
 	cp amiga/icons-d2x/Descent2.info amiga/icons-d2x/ReadMe.info \
 	   amiga/icons-d2x/COPYING.info amiga/icons-d2x/Data.info $(OUT2)/
 	cp amiga/icons-d2x/ReadMe.info $(OUT2)/Data/ReadMe.info
 	cp amiga/icons-d2x/Descent2-drawer.info $(BUILD)/Descent2.info
-
-$(PHYSFS_LIB): $(PHYSFS_OBJ)
-	rm -f $@
-	$(AR) rcs $@ $^
-
-$(OBJDIR)/physfs/%.o: amiga/physfs/%.c
-	@mkdir -p $(dir $@)
-	$(CC) $(PHYSFS_CFLAGS) -c -o $@ $<
 
 $(OBJDIR)/common/%.o: common/%.cpp
 	@mkdir -p $(dir $@)
@@ -292,11 +281,11 @@ $(OUT) $(OUT2):
 
 
 clean:
-	rm -rf $(OBJDIR) $(PHYSFS_LIB) $(OUT) $(BUILD)/Descent.info \
+	rm -rf $(OBJDIR) $(OUT) $(BUILD)/Descent.info \
 	  $(OUT2) $(BUILD)/Descent2.info
 
 .PHONY: all d1x d2x clean
 
 # Every object, without linking.
-objs: $(OBJS) $(D2X_OBJ) $(PHYSFS_LIB)
+objs: $(OBJS) $(D2X_OBJ)
 .PHONY: objs

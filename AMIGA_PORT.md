@@ -100,16 +100,16 @@ generate-kconfig-udlr.py, as SCons does.
 PhysicsFS
 ---------
 
-PhysicsFS 3.2.0 (release-3.2.0, eb3383b532c5f74bfeb42ec306ba2cf80eed988c,
-zlib licence, amiga/physfs/LICENSE.txt) is built into the program: the
-directory, HOG, ZIP and MVL (Descent 2's movie libraries) archivers
-only. amiga/physfs/physfs_platform_amiga.c
-is a dos.library platform layer: AmigaDOS names, in which a trailing "/"
-means the parent drawer, are tidied before they are opened; the base,
-user and pref dirs are all PROGDIR:. Small marked changes in physfs.h,
-physfs_internal.h and physfs_platforms.h select it and drop the GCC
-visibility and __sync atomics the Amiga toolchain lacks. Its zip reader
-has its own inflate; zlib is not needed.
+PhysicsFS 3.2.0 is LIBS:physfs.library (DalsinAI/gfopenphysfs, zlib
+licence), one copy for every port on the machine, not a copy built into
+the program. GFOpenUp installs it; otherwise copy physfs.library into
+LIBS:. The game opens it at start (libphysfs_auto) and says so if it is
+missing. Its AmigaOS platform layer is the one this port had built in:
+AmigaDOS names, in which a trailing "/" means the parent drawer, are
+tidied before they are opened; the base, user and pref dirs are all
+PROGDIR:. HOG files and Descent 2's MVL movie libraries read as before.
+Zip members that are deflated (some add-on missions) inflate through
+LIBS:z.library, which GFOpenUp also installs.
 
 Changes to DXX-Rebirth
 ----------------------
