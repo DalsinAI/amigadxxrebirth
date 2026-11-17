@@ -6,8 +6,9 @@
 # - each --log (a build's output): it shows compile lines, each compile and
 #   link is -m68040 -msoft-float, and -m68881 is nowhere in it;
 # - each object (*.o and *.a, or every one under a drawer): no FPU
-#   instruction (package/fpu_check.py; --allow names C constant tables,
-#   "OBJECT SYMBOL  # why" a line);
+#   instruction (package/fpu_check.py; --allow, by default
+#   package/fpu-allow.txt, names C constant tables, "OBJECT SYMBOL  # why"
+#   a line);
 # - PROGRAM (not stripped, or its .debug): fpuauto is linked in.
 # STOVE is the stove's prefix (bin/m68k-amigaos-*). Exits 1 on the first
 # check that fails, with what failed.
@@ -45,6 +46,8 @@ for o in "$@"; do
 	if [ -d "$o" ]; then find "$o" \( -name '*.o' -o -name '*.a' \) -type f; else echo "$o"; fi
 done | sort > "$LIST"
 [ -s "$LIST" ] || { echo "FAIL no objects to check"; exit 1; }
+# Without --allow, package/fpu-allow.txt when there is one.
+[ -n "$ALLOW" ] || [ ! -f "$HERE/fpu-allow.txt" ] || ALLOW="$HERE/fpu-allow.txt"
 set --
 [ -z "$ALLOW" ] || set -- --allow "$ALLOW"
 # shellcheck disable=SC2046
