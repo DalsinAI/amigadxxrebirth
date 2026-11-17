@@ -1,10 +1,10 @@
-; $VER: Install-Descent2 0.61.0-amiga2 (6.11.2026)
+; $VER: Install-Descent2 0.61.0-amiga3-rc1 (17.11.2026)
 ; The Amiga Installer script for Descent 2, an AmiCradle game port.
-; Made by amicradle scripts/port_installer.py: change the spec, not this file.
+; Made by amicradle scripts/ports/port_installer.py: change the spec, not this file.
 ; Run it from its icon, beside the Descent2 drawer where the archive was unpacked.
 
 (set @app-name "Descent 2")
-(set #version "0.61.0-amiga2")
+(set #version "0.61.0-amiga3-rc1")
 (set #drawer "Descent2")
 (set #program "Descent2")
 (set #space 11719)  ; KB
@@ -30,7 +30,7 @@
 (if (<> (exists (tackon #from #program) (noreq)) 1)
     (abort "The Descent2 drawer has no Descent2 in it. Unpack the whole archive again."))
 
-(welcome "This installs Descent 2 0.61.0-amiga2 for AmigaOS 3.2 on a 68040, 68060 or 68080 with an FPU.")
+(welcome "This installs Descent 2 0.61.0-amiga3-rc1 for AmigaOS 3.2 on a 68040, 68060 or 68080 with an FPU.")
 
 ; where: the parent drawer
 (set #default
@@ -77,11 +77,153 @@
         (dest #parent)
         (choices "Descent2.info")))
 
+(set #later "")
+
+; the game data the drawer does not carry: downloaded with C:Atlas, or copied from
+; the player's own drawer, disk or CD; each file's SHA-256 checked where the spec names it
+(set #atlas (= (exists "C:Atlas" (noreq)) 1))
+
+; your own Descent 2 (the full game, 1.2)
+(set #into1 (tackon #dest "Data"))
+(if (<> (exists #into1 (noreq)) 2) (makedir #into1))
+(set #have (and (= (exists (tackon #into1 "descent2.hog") (noreq)) 1) (= (exists (tackon #into1 "descent2.ham") (noreq)) 1) (= (exists (tackon #into1 "descent2.pig") (noreq)) 1) (= (exists (tackon #into1 "alien1.pig") (noreq)) 1) (= (exists (tackon #into1 "alien2.pig") (noreq)) 1) (= (exists (tackon #into1 "fire.pig") (noreq)) 1) (= (exists (tackon #into1 "groupa.pig") (noreq)) 1) (= (exists (tackon #into1 "ice.pig") (noreq)) 1) (= (exists (tackon #into1 "water.pig") (noreq)) 1)))
+(if (not #have)
+    (
+        (set #how
+            (askchoice
+                (prompt "Descent 2 needs your own Descent 2 (the full game, 1.2). How should the Installer get it?")
+                (help "Descent 2 needs your own Descent 2 (the full game, 1.2): descent2.hog, descent2.ham, descent2.pig, alien1.pig, alien2.pig, fire.pig, groupa.pig, ice.pig, water.pig, in Data. Copy takes the files from a drawer you choose: the game's own install, a disk or a CD. Not now leaves the drawer as it is: run the Installer again later, or copy the files in yourself.")
+                (choices "Copy it from my own drawer, disk or CD" "Not now: the game starts without it")
+                (default 0)))
+        (if (= #how 0)
+            (
+                (set #src
+                    (askdir
+                        (prompt "Choose the drawer (or disk, or CD) that has descent2.hog, descent2.ham, descent2.pig, alien1.pig, alien2.pig, fire.pig, groupa.pig, ice.pig, water.pig.")
+                        (help "Descent 2 needs your own Descent 2 (the full game, 1.2): descent2.hog, descent2.ham, descent2.pig, alien1.pig, alien2.pig, fire.pig, groupa.pig, ice.pig, water.pig, in Data. Copy takes the files from a drawer you choose: the game's own install, a disk or a CD. Not now leaves the drawer as it is: run the Installer again later, or copy the files in yourself.")
+                        (default #dest)))
+                (set #ok 1)
+                (if (<> (exists (tackon #src "descent2.hog") (noreq)) 1)
+                    ((set #ok 0) (message (cat "There is no descent2.hog in " #src ". Nothing was copied for your own Descent 2 (the full game, 1.2): run Install-Descent2 again to choose another drawer."))))
+                (if (<> (exists (tackon #src "descent2.ham") (noreq)) 1)
+                    ((set #ok 0) (message (cat "There is no descent2.ham in " #src ". Nothing was copied for your own Descent 2 (the full game, 1.2): run Install-Descent2 again to choose another drawer."))))
+                (if (<> (exists (tackon #src "descent2.pig") (noreq)) 1)
+                    ((set #ok 0) (message (cat "There is no descent2.pig in " #src ". Nothing was copied for your own Descent 2 (the full game, 1.2): run Install-Descent2 again to choose another drawer."))))
+                (if (<> (exists (tackon #src "alien1.pig") (noreq)) 1)
+                    ((set #ok 0) (message (cat "There is no alien1.pig in " #src ". Nothing was copied for your own Descent 2 (the full game, 1.2): run Install-Descent2 again to choose another drawer."))))
+                (if (<> (exists (tackon #src "alien2.pig") (noreq)) 1)
+                    ((set #ok 0) (message (cat "There is no alien2.pig in " #src ". Nothing was copied for your own Descent 2 (the full game, 1.2): run Install-Descent2 again to choose another drawer."))))
+                (if (<> (exists (tackon #src "fire.pig") (noreq)) 1)
+                    ((set #ok 0) (message (cat "There is no fire.pig in " #src ". Nothing was copied for your own Descent 2 (the full game, 1.2): run Install-Descent2 again to choose another drawer."))))
+                (if (<> (exists (tackon #src "groupa.pig") (noreq)) 1)
+                    ((set #ok 0) (message (cat "There is no groupa.pig in " #src ". Nothing was copied for your own Descent 2 (the full game, 1.2): run Install-Descent2 again to choose another drawer."))))
+                (if (<> (exists (tackon #src "ice.pig") (noreq)) 1)
+                    ((set #ok 0) (message (cat "There is no ice.pig in " #src ". Nothing was copied for your own Descent 2 (the full game, 1.2): run Install-Descent2 again to choose another drawer."))))
+                (if (<> (exists (tackon #src "water.pig") (noreq)) 1)
+                    ((set #ok 0) (message (cat "There is no water.pig in " #src ". Nothing was copied for your own Descent 2 (the full game, 1.2): run Install-Descent2 again to choose another drawer."))))
+                (if #ok
+                    (copyfiles
+                        (prompt "Copying your own Descent 2 (the full game, 1.2)")
+                        (help @copyfiles-help)
+                        (source #src)
+                        (dest #into1)
+                        (choices "descent2.hog" "descent2.ham" "descent2.pig" "alien1.pig" "alien2.pig" "fire.pig" "groupa.pig" "ice.pig" "water.pig")
+                        (optional "nofail" "force")))
+            )
+        )
+        (if (= #how 1)
+            (set #later (if (= #later "") "your own Descent 2 (the full game, 1.2)" (cat #later ", " "your own Descent 2 (the full game, 1.2)")))
+        )
+    )
+)
+
+; Descent 2's sounds
+(set #into2 (tackon #dest "Data"))
+(if (<> (exists #into2 (noreq)) 2) (makedir #into2))
+(set #have (or (= (exists (tackon #into2 "descent2.s11") (noreq)) 1) (= (exists (tackon #into2 "descent2.s22") (noreq)) 1)))
+(if (not #have)
+    (
+        (set #how
+            (askchoice
+                (prompt "Descent 2 needs Descent 2's sounds. How should the Installer get it?")
+                (help "Descent 2 needs Descent 2's sounds: one of descent2.s11, descent2.s22, in Data. Copy takes the files from a drawer you choose: the game's own install, a disk or a CD. Not now leaves the drawer as it is: run the Installer again later, or copy the files in yourself.")
+                (choices "Copy it from my own drawer, disk or CD" "Not now: the game starts without it")
+                (default 0)))
+        (if (= #how 0)
+            (
+                (set #src
+                    (askdir
+                        (prompt "Choose the drawer (or disk, or CD) that has one of descent2.s11, descent2.s22.")
+                        (help "Descent 2 needs Descent 2's sounds: one of descent2.s11, descent2.s22, in Data. Copy takes the files from a drawer you choose: the game's own install, a disk or a CD. Not now leaves the drawer as it is: run the Installer again later, or copy the files in yourself.")
+                        (default #dest)))
+                (set #ok 1)
+                (if (and #ok (not (or (= (exists (tackon #src "descent2.s11") (noreq)) 1) (= (exists (tackon #src "descent2.s22") (noreq)) 1))))
+                    ((set #ok 0) (message (cat "There is none of descent2.s11, descent2.s22 in " #src ". Nothing was copied for Descent 2's sounds."))))
+                (if #ok
+                    (copyfiles
+                        (prompt "Copying Descent 2's sounds")
+                        (help @copyfiles-help)
+                        (source #src)
+                        (dest #into2)
+                        (choices "descent2.s11" "descent2.s22")
+                        (optional "nofail" "force")))
+            )
+        )
+        (if (= #how 1)
+            (set #later (if (= #later "") "Descent 2's sounds" (cat #later ", " "Descent 2's sounds")))
+        )
+    )
+)
+
+; the Descent 2 demo data
+(set #into3 (tackon #dest "Data"))
+(if (<> (exists #into3 (noreq)) 2) (makedir #into3))
+(set #have (and (= (exists (tackon #into3 "d2demo.hog") (noreq)) 1) (= (exists (tackon #into3 "d2demo.ham") (noreq)) 1) (= (exists (tackon #into3 "d2demo.pig") (noreq)) 1)))
+(if (not #have)
+    (
+        (set #how
+            (askchoice
+                (prompt "Descent 2 needs the Descent 2 demo data. How should the Installer get it?")
+                (help "Descent 2 needs the Descent 2 demo data: d2demo.hog, d2demo.ham, d2demo.pig, in Data. Copy takes the files from a drawer you choose: the game's own install, a disk or a CD. Not now leaves the drawer as it is: run the Installer again later, or copy the files in yourself.")
+                (choices "Copy it from my own drawer, disk or CD" "Not now: the game starts without it")
+                (default 0)))
+        (if (= #how 0)
+            (
+                (set #src
+                    (askdir
+                        (prompt "Choose the drawer (or disk, or CD) that has d2demo.hog, d2demo.ham, d2demo.pig.")
+                        (help "Descent 2 needs the Descent 2 demo data: d2demo.hog, d2demo.ham, d2demo.pig, in Data. Copy takes the files from a drawer you choose: the game's own install, a disk or a CD. Not now leaves the drawer as it is: run the Installer again later, or copy the files in yourself.")
+                        (default #dest)))
+                (set #ok 1)
+                (if (<> (exists (tackon #src "d2demo.hog") (noreq)) 1)
+                    ((set #ok 0) (message (cat "There is no d2demo.hog in " #src ". Nothing was copied for the Descent 2 demo data: run Install-Descent2 again to choose another drawer."))))
+                (if (<> (exists (tackon #src "d2demo.ham") (noreq)) 1)
+                    ((set #ok 0) (message (cat "There is no d2demo.ham in " #src ". Nothing was copied for the Descent 2 demo data: run Install-Descent2 again to choose another drawer."))))
+                (if (<> (exists (tackon #src "d2demo.pig") (noreq)) 1)
+                    ((set #ok 0) (message (cat "There is no d2demo.pig in " #src ". Nothing was copied for the Descent 2 demo data: run Install-Descent2 again to choose another drawer."))))
+                (if #ok
+                    (copyfiles
+                        (prompt "Copying the Descent 2 demo data")
+                        (help @copyfiles-help)
+                        (source #src)
+                        (dest #into3)
+                        (choices "d2demo.hog" "d2demo.ham" "d2demo.pig")
+                        (optional "nofail" "force")))
+            )
+        )
+        (if (= #how 1)
+            (set #later (if (= #later "") "the Descent 2 demo data" (cat #later ", " "the Descent 2 demo data")))
+        )
+    )
+)
+(complete 90)
+
 (set @default-dest #dest)
 (complete 100)
 (if @pretend
     (message (cat "Pretend: nothing was copied or changed. Descent 2 would have gone in " #dest "."))
-    (message (cat "Descent 2 0.61.0-amiga2 is installed in " #dest "."
+    (message (cat "Descent 2 0.61.0-amiga3-rc1 is installed in " #dest "."
                   "\n\nTo start it, open the Descent2 drawer and double-click the Descent2 icon."
-                  (if (= #kept "") "" (cat "\n\nLeft as they were: " #kept ".")))))
+                  (if (= #kept "") "" (cat "\n\nLeft as they were: " #kept "."))
+                  (if (= #later "") "" (cat "\n\nStill to add to the drawer: " #later ". Run Install-Descent2 again to fetch or copy it.")))))
 (exit (quiet))

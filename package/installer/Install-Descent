@@ -1,10 +1,10 @@
-; $VER: Install-Descent 0.61.0-amiga2 (6.11.2026)
+; $VER: Install-Descent 0.61.0-amiga3-rc1 (17.11.2026)
 ; The Amiga Installer script for Descent, an AmiCradle game port.
-; Made by amicradle scripts/port_installer.py: change the spec, not this file.
+; Made by amicradle scripts/ports/port_installer.py: change the spec, not this file.
 ; Run it from its icon, beside the Descent drawer where the archive was unpacked.
 
 (set @app-name "Descent")
-(set #version "0.61.0-amiga2")
+(set #version "0.61.0-amiga3-rc1")
 (set #drawer "Descent")
 (set #program "Descent")
 (set #space 11719)  ; KB
@@ -30,7 +30,7 @@
 (if (<> (exists (tackon #from #program) (noreq)) 1)
     (abort "The Descent drawer has no Descent in it. Unpack the whole archive again."))
 
-(welcome "This installs Descent 0.61.0-amiga2 for AmigaOS 3.2 on a 68040, 68060 or 68080 with an FPU.")
+(welcome "This installs Descent 0.61.0-amiga3-rc1 for AmigaOS 3.2 on a 68040, 68060 or 68080 with an FPU.")
 
 ; where: the parent drawer
 (set #default
@@ -77,11 +77,59 @@
         (dest #parent)
         (choices "Descent.info")))
 
+(set #later "")
+
+; the game data the drawer does not carry: downloaded with C:Atlas, or copied from
+; the player's own drawer, disk or CD; each file's SHA-256 checked where the spec names it
+(set #atlas (= (exists "C:Atlas" (noreq)) 1))
+
+; the Descent 1 data (shareware 1.4, or your own full game)
+(set #into1 (tackon #dest "Data"))
+(if (<> (exists #into1 (noreq)) 2) (makedir #into1))
+(set #have (and (= (exists (tackon #into1 "descent.hog") (noreq)) 1) (= (exists (tackon #into1 "descent.pig") (noreq)) 1)))
+(if (not #have)
+    (
+        (set #how
+            (askchoice
+                (prompt "Descent needs the Descent 1 data (shareware 1.4, or your own full game). How should the Installer get it?")
+                (help "Descent needs the Descent 1 data (shareware 1.4, or your own full game): descent.hog, descent.pig, in Data. Copy takes the files from a drawer you choose: the game's own install, a disk or a CD. Not now leaves the drawer as it is: run the Installer again later, or copy the files in yourself.")
+                (choices "Copy it from my own drawer, disk or CD" "Not now: the game starts without it")
+                (default 0)))
+        (if (= #how 0)
+            (
+                (set #src
+                    (askdir
+                        (prompt "Choose the drawer (or disk, or CD) that has descent.hog, descent.pig.")
+                        (help "Descent needs the Descent 1 data (shareware 1.4, or your own full game): descent.hog, descent.pig, in Data. Copy takes the files from a drawer you choose: the game's own install, a disk or a CD. Not now leaves the drawer as it is: run the Installer again later, or copy the files in yourself.")
+                        (default #dest)))
+                (set #ok 1)
+                (if (<> (exists (tackon #src "descent.hog") (noreq)) 1)
+                    ((set #ok 0) (message (cat "There is no descent.hog in " #src ". Nothing was copied for the Descent 1 data (shareware 1.4, or your own full game): run Install-Descent again to choose another drawer."))))
+                (if (<> (exists (tackon #src "descent.pig") (noreq)) 1)
+                    ((set #ok 0) (message (cat "There is no descent.pig in " #src ". Nothing was copied for the Descent 1 data (shareware 1.4, or your own full game): run Install-Descent again to choose another drawer."))))
+                (if #ok
+                    (copyfiles
+                        (prompt "Copying the Descent 1 data (shareware 1.4, or your own full game)")
+                        (help @copyfiles-help)
+                        (source #src)
+                        (dest #into1)
+                        (choices "descent.hog" "descent.pig")
+                        (optional "nofail" "force")))
+            )
+        )
+        (if (= #how 1)
+            (set #later (if (= #later "") "the Descent 1 data (shareware 1.4, or your own full game)" (cat #later ", " "the Descent 1 data (shareware 1.4, or your own full game)")))
+        )
+    )
+)
+(complete 90)
+
 (set @default-dest #dest)
 (complete 100)
 (if @pretend
     (message (cat "Pretend: nothing was copied or changed. Descent would have gone in " #dest "."))
-    (message (cat "Descent 0.61.0-amiga2 is installed in " #dest "."
+    (message (cat "Descent 0.61.0-amiga3-rc1 is installed in " #dest "."
                   "\n\nTo start it, open the Descent drawer and double-click the Descent icon."
-                  (if (= #kept "") "" (cat "\n\nLeft as they were: " #kept ".")))))
+                  (if (= #kept "") "" (cat "\n\nLeft as they were: " #kept "."))
+                  (if (= #later "") "" (cat "\n\nStill to add to the drawer: " #later ". Run Install-Descent again to fetch or copy it.")))))
 (exit (quiet))

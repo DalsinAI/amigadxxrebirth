@@ -39,7 +39,19 @@ for drawer in $GAMES; do
 	*) echo "GAMES: no game $drawer" >&2; exit 1 ;;
 	esac
 done
-make -f amiga/Makefile.amigaos STOVE="$STOVE" NDK="$NDK" ACGAME="$ACGAME" ACGAMELIB="$ACGAMELIB" ACSDL="$ACSDL" ACSDLLIB="$ACSDLLIB" -j4 $TARGETS > "$OUT/build-output.txt" 2>&1 || { tail -n 60 "$OUT/build-output.txt"; exit 1; }
+# PHYSFSKIT: physfs.library's SDK (include/physfs.h, lib/libphysfs_auto.a);
+# the GFOpenGPU developer kit carries it (the stove doesn't).
+PHYSFSKIT=${PHYSFSKIT:-/home/da1ek/AmiCradle-dev/scratch/rc-20261115/gpu-sdk/GFOpenGPU-SDK-0.7}
+[ -f "$PHYSFSKIT/include/physfs.h" ] || { echo "no physfs.h in PHYSFSKIT ($PHYSFSKIT)"; exit 1; }
+make -f amiga/Makefile.amigaos STOVE="$STOVE" NDK="$NDK" ACGAME="$ACGAME" ACGAMELIB="$ACGAMELIB" ACSDL="$ACSDL" ACSDLLIB="$ACSDLLIB" PHYSFSKIT="$PHYSFSKIT" -j"${JOBS:-2}" $TARGETS > "$OUT/build-output.txt" 2>&1 || { tail -n 60 "$OUT/build-output.txt"; exit 1; }
+# One binary each for every 68040 and 68060: -m68040 -msoft-float throughout
+# (the games and acsdl12), no FPU instruction in their objects, the stove's
+# fpuauto linked in.
+for drawer in $GAMES; do
+	sh "$HERE/soft-float.sh" "$STOVE" "build/amigaos/$drawer/$drawer" --log "$OUT/build-output.txt" \
+		--log "$OUT/acsdl12-output.txt" build/amigaos "$ACSDLLIB" || exit 1
+done > "$OUT/soft-float.txt" || { cat "$OUT/soft-float.txt"; exit 1; }
+cat "$OUT/soft-float.txt"
 
 # For each game: the program, checked by its SHA-256, the rest of the
 # drawer as a tar, and what the ReadMe and the check name (the program's

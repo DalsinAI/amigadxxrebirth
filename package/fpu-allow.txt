@@ -1,0 +1,3 @@
+# C constant tables in .text that objdump decodes as code (OBJECT SYMBOL  # why)
+z_crc32.o _crc_braid_big_table  # zlib's CRC-32 braid table in acsdl12, const z_word_t
+libacsdl12.a _crc_braid_big_table  # the same table, in the archive

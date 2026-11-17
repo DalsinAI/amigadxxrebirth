@@ -57,8 +57,9 @@ if [ "${ACSDL12:-0}" = 1 ]; then
 		ZLIB="$DEPS/zlib"
 	fi
 	ACSDLLIB="$DEPS/acsdl12-out"
-	# ACG= leaves ACGame's own sources out of libacsdl12.a.
+	# ACG= leaves ACGame's own sources out of libacsdl12.a; it is soft float,
+	# as the game is (the stove's fpuauto takes the FPU when there is one).
 	make -C "$ACSDL" -f Makefile.amigaos STOVE="$STOVE" NDK="$NDK" ACGAME="$ACGAME" ZLIB="$ZLIB" \
-		ACG= BUILD="$ACSDLLIB" -j4 > "$OUT/acsdl12-output.txt" 2>&1 ||
+		ACG= BUILD="$ACSDLLIB" CPU="-m68040 -msoft-float" -j"${JOBS:-2}" > "$OUT/acsdl12-output.txt" 2>&1 ||
 		{ tail -n 60 "$OUT/acsdl12-output.txt"; exit 1; }
 fi

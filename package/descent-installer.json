@@ -1,6 +1,6 @@
 {
   "name": "Descent",
-  "version": "0.61.0-amiga2",
+  "version": "0.61.0-amiga3-rc1",
   "drawer": "Descent",
   "program": "Descent",
   "cpu": "68040",
@@ -11,5 +11,17 @@
     "Data"
   ],
   "parent": "Work:Games",
-  "badge": "../amiga/icons/art/d1x-rebirth.png"
+  "badge": "../amiga/icons/art/dxxrebirth.png",
+  "data": [
+    {
+      "what": "the Descent 1 data (shareware 1.4, or your own full game)",
+      "into": "Data",
+      "files": [
+        "descent.hog",
+        "descent.pig"
+      ],
+      "import": true,
+      "optional": true
+    }
+  ]
 }

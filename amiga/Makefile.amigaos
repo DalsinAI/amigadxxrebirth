@@ -41,7 +41,7 @@ CXX     = $(STOVE)/bin/m68k-amigaos-g++
 CC      = $(STOVE)/bin/m68k-amigaos-gcc
 AR      = $(STOVE)/bin/m68k-amigaos-ar
 PYTHON  ?= python3
-CPU     ?= -m68040 -m68881
+CPU     ?= -m68040 -msoft-float
 OPT     ?= -O2 -fomit-frame-pointer
 
 .DEFAULT_GOAL := all
