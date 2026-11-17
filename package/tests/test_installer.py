@@ -7,7 +7,8 @@ python3 package/tests/test_installer.py, from the checkout (no stove needed):
   version, every data item's drawer, download (address, SHA-256, size) and
   import in the script;
 - package/soft-float.json's Makefiles: soft float by default, no -m68881;
-  package/build-amiga.sh runs package/soft-float.sh;
+  package/build-amiga.sh (or soft-float.json's builds) runs
+  package/soft-float.sh;
 - package/soft-float.sh stops on a build log with -m68881, with a compile
   without -msoft-float, or with no compile lines;
 - package/fpu_check.py: tables are data, functions are code;
@@ -37,12 +38,14 @@ def check(ok: bool, what: str) -> None:
 
 
 HEX64 = re.compile(r"[0-9a-f]{64}")
+sf = json.loads((PKG / "soft-float.json").read_text())
 specs = sorted(PKG.glob("*installer.json"))
 check(specs != [], "package/ has an Installer spec")
 for path in specs:
     spec = json.loads(path.read_text())
     drawer, name = spec["drawer"], path.name
-    check(spec.get("cpu") == "68040" and spec.get("fpu") is True, f"{name}: a 68040 with an FPU")
+    fpu = sf.get("fpu", True)              # false: the port runs without an FPU too
+    check(spec.get("cpu") == "68040" and spec.get("fpu") is fpu, f"{name}: a 68040" + (" with an FPU" if fpu else ""))
     inst_path = PKG / "installer" / f"Install-{drawer}"
     check(inst_path.is_file() and (PKG / "installer" / f"Install-{drawer}.info").is_file(),
           f"{name}: Install-{drawer} and its icon are in package/installer")
@@ -69,15 +72,15 @@ for path in specs:
             check("C:Atlas FETCH" in inst, f"{name}: the download is C:Atlas FETCH")
         check(bool(dl) or bool(d.get("import", True)), f"{name}: {what} has a download or an import")
 
-sf = json.loads((PKG / "soft-float.json").read_text())
 for mk in sf["makefiles"]:
     text = (ROOT / mk).read_text()
     check("-m68881" not in text, f"{mk} has no -m68881")
     check(re.search(r"^CPU\s*\??=\s*-m68040 -msoft-float\s*$", text, re.M) is not None or mk in sf.get("no_cpu", []),
           f"{mk}: CPU is -m68040 -msoft-float by default")
-build = (PKG / "build-amiga.sh").read_text()
-check("soft-float.sh" in build, "package/build-amiga.sh runs package/soft-float.sh")
-check("-m68881" not in build, "package/build-amiga.sh has no -m68881")
+for b in sf.get("builds", ["package/build-amiga.sh"]):
+    build = (ROOT / b).read_text()
+    check("soft-float.sh" in build, f"{b} runs package/soft-float.sh")
+    check("-m68881" not in build, f"{b} has no -m68881")
 
 with tempfile.TemporaryDirectory() as t:
     t = Path(t)
@@ -104,6 +107,13 @@ check(not fpu_check.is_data("_main", "_main"), "fpu_check fails an FPU instructi
 check(fpu_check.is_data("__ZN4Math13sineWindow512E", "Math::sineWindow512"), "fpu_check reads a C++ table as data")
 check(fpu_check.fpu_hits("00000000 <_f>:\n   0:\tf200 0400 \tfmovel %d0,%fp0\n") == [("_f", "fmovel")],
       "fpu_check finds an FPU instruction")
+switch = ("00000000 <_f>:\n   0:\t303b 0a06 \tmovew %pc@(8 <_f+0x8>,%d0:l:2),%d0\n"
+          "   4:\t4efb 0002 \tjmp %pc@(8 <_f+0x8>,%d0:w)\n   8:\tf2c2 0004 \tfbogtl 12\n"
+          "   c:\tf200 0400 \tfmovel %d0,%fp0\n")
+check(fpu_check.fpu_hits(switch) == [("_f", "fmovel")], "fpu_check skips a switch's jump table, and finds code after it")
+backward = ("00000000 <_g>:\n   0:\t4efb 0002 \tjmp %pc@(4 <_g+0x4>,%d0:w)\n   4:\tf2c2 fffc \tfbogtl 2\n"
+            "00000008 <_h>:\n   8:\tf200 0400 \tfmovel %d0,%fp0\n")
+check(fpu_check.fpu_hits(backward) == [("_h", "fmovel")], "a jump table with every case before it ends at the next symbol")
 
 allow = PKG / "fpu-allow.txt"
 if allow.exists():
