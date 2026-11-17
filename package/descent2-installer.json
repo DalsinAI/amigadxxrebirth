@@ -1,6 +1,6 @@
 {
   "name": "Descent 2",
-  "version": "0.61.0-amiga2",
+  "version": "0.61.0-amiga3-rc1",
   "drawer": "Descent2",
   "program": "Descent2",
   "cpu": "68040",
@@ -11,5 +11,45 @@
     "Data"
   ],
   "parent": "Work:Games",
-  "badge": "../amiga/icons-d2x/art/d2x-rebirth.png"
+  "badge": "../amiga/icons-d2x/art/dxxrebirth.png",
+  "data": [
+    {
+      "what": "your own Descent 2 (the full game, 1.2)",
+      "into": "Data",
+      "files": [
+        "descent2.hog",
+        "descent2.ham",
+        "descent2.pig",
+        "alien1.pig",
+        "alien2.pig",
+        "fire.pig",
+        "groupa.pig",
+        "ice.pig",
+        "water.pig"
+      ],
+      "import": true,
+      "optional": true
+    },
+    {
+      "what": "Descent 2's sounds",
+      "into": "Data",
+      "any": [
+        "descent2.s11",
+        "descent2.s22"
+      ],
+      "import": true,
+      "optional": true
+    },
+    {
+      "what": "the Descent 2 demo data",
+      "into": "Data",
+      "files": [
+        "d2demo.hog",
+        "d2demo.ham",
+        "d2demo.pig"
+      ],
+      "import": true,
+      "optional": true
+    }
+  ]
 }
